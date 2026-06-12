@@ -66,7 +66,7 @@ class Config:
 class ConfigManager:
     path = Path(
         os.environ.get(
-            "IC_CONFIG_PATH",
+            "SYNTHESIZER_CONFIG_PATH",
             Path.home() / ".config" / "synthesizer" / "config.json",
         )
     )
