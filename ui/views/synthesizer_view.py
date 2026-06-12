@@ -59,11 +59,11 @@ class Partial:
 
 
 class SynthesizerView:
-    def __init__(self, audio_engine):
+    def __init__(self, audio_engine, n_partials=8):
         self.audio_engine = audio_engine
         self.width = 1280
         self.height = 720
-        self.n_partials = 8
+        self.n_partials = n_partials
         self.margin_x = 30
         self.bottom_gutter = 95
         self.top_bar_h = 64
@@ -99,7 +99,13 @@ class SynthesizerView:
             usable_w / (self.n_partials - 1) if self.n_partials > 1 else usable_w
         )
         self.base_y = self.height - self.bottom_gutter
-        self.drag_strip_w = int(max(48, self.step * 0.6))
+        self.drag_strip_w = int(max(32, self.step * 0.7))
+
+        # Dynamic bubble scaling
+        base_min_r = 32
+        base_max_r = 56
+        # Reduce size if they would overlap too much
+        scale_factor = min(1.0, (self.step * 0.8) / (base_max_r * 2))
 
         self.partials = [
             Partial(
@@ -115,6 +121,10 @@ class SynthesizerView:
             for i in range(self.n_partials)
         ]
 
+        for p in self.partials:
+            p.bubble_min_r = int(base_min_r * scale_factor)
+            p.bubble_max_r = int(base_max_r * scale_factor)
+
         self.presets_file = "settings.json"
         # Try to use a persistent path on Buildroot if it exists
         if os.path.exists("/data/config"):
@@ -127,11 +137,48 @@ class SynthesizerView:
 
         btn_w, btn_h, pad = 140, 44, 12
         self.buttons = [
-            ButtonWidget((16, 10, btn_w, btn_h), "MUTE ALL", self.mute_all, self.font_med, self.panel_accent, self.white),
-            ButtonWidget((16 + (btn_w + pad), 10, btn_w, btn_h), "RANDOMIZE", self.randomize, self.font_med, self.panel_accent, self.white),
-            ButtonWidget((16 + 2 * (btn_w + pad), 10, btn_w, btn_h), "WAVEFORM", self.toggle_waveform, self.font_med, self.panel_accent, self.white),
-            ButtonWidget((16 + 3 * (btn_w + pad), 10, btn_w, btn_h), "PRESET 1", lambda: self.load_preset(1), self.font_med, self.panel_accent, self.white, long_press_action=lambda: self.save_preset(1)),
-            ButtonWidget((16 + 4 * (btn_w + pad), 10, btn_w, btn_h), "PRESET 2", lambda: self.load_preset(2), self.font_med, self.panel_accent, self.white, long_press_action=lambda: self.save_preset(2)),
+            ButtonWidget(
+                (16, 10, btn_w, btn_h),
+                "MUTE ALL",
+                self.mute_all,
+                self.font_med,
+                self.panel_accent,
+                self.white,
+            ),
+            ButtonWidget(
+                (16 + (btn_w + pad), 10, btn_w, btn_h),
+                "RANDOMIZE",
+                self.randomize,
+                self.font_med,
+                self.panel_accent,
+                self.white,
+            ),
+            ButtonWidget(
+                (16 + 2 * (btn_w + pad), 10, btn_w, btn_h),
+                "WAVEFORM",
+                self.toggle_waveform,
+                self.font_med,
+                self.panel_accent,
+                self.white,
+            ),
+            ButtonWidget(
+                (16 + 3 * (btn_w + pad), 10, btn_w, btn_h),
+                "SAWTOOTH",
+                lambda: self.load_preset(1),
+                self.font_med,
+                self.panel_accent,
+                self.white,
+                long_press_action=lambda: self.save_preset(1),
+            ),
+            ButtonWidget(
+                (16 + 4 * (btn_w + pad), 10, btn_w, btn_h),
+                "SQUARE",
+                lambda: self.load_preset(2),
+                self.font_med,
+                self.panel_accent,
+                self.white,
+                long_press_action=lambda: self.save_preset(2),
+            ),
         ]
 
         slider_w = 160
@@ -143,33 +190,73 @@ class SynthesizerView:
             initial_value=self.master_volume,
             action=self.set_master_volume,
             bg_color=self.bg_color,
-            fill_color=(75, 192, 192)  # Teal
+            fill_color=(75, 192, 192),  # Teal
         )
 
         self.active_idx = None
-        # Apply initial persistent volume to audio engine
         self.audio_engine.set_master_volume(self.master_volume)
         self._notify_audio()
 
     def _load_settings(self):
-        defaults = {"presets": {"1": None, "2": None}, "master_volume": 0.5, "show_waveform": False}
+        # Generate dynamic factory defaults based on current n_partials
+        # The image shows a linear decay, not 1/n.
+        # e.g., for 16 partials, it goes from 1.0 down to ~0.0625 linearly
+        sawtooth = [
+            ((self.n_partials - i) / self.n_partials, True)
+            for i in range(self.n_partials)
+        ]
+        square = [
+            ((self.n_partials - i) / self.n_partials if i % 2 == 0 else 0.0, True)
+            for i in range(self.n_partials)
+        ]
+
+        defaults = {
+            "presets": {"1": sawtooth, "2": square},
+            "master_volume": 0.5,
+            "show_waveform": False,
+        }
         if os.path.exists(self.presets_file):
             try:
                 with open(self.presets_file, "r") as f:
                     data = json.load(f)
-                    # Migrate old format if necessary
+                    # Migrate old format or fill missing slots
                     if "presets" not in data:
-                        return {"presets": data, "master_volume": 0.5, "show_waveform": False}
+                        data = {
+                            "presets": {"1": sawtooth, "2": square},
+                            "master_volume": 0.5,
+                            "show_waveform": False,
+                        }
+
+                    # Ensure factory defaults are used if slots are empty or length changed
+                    if (
+                        data["presets"].get("1") is None
+                        or len(data["presets"]["1"]) != self.n_partials
+                    ):
+                        data["presets"]["1"] = sawtooth
+                    if (
+                        data["presets"].get("2") is None
+                        or len(data["presets"]["2"]) != self.n_partials
+                    ):
+                        data["presets"]["2"] = square
+
                     return data
             except Exception as e:
                 print(f"Error loading settings: {e}")
+
+        # If no file exists, save the factory defaults immediately
+        try:
+            with open(self.presets_file, "w") as f:
+                json.dump(defaults, f)
+        except Exception:
+            pass
+
         return defaults
 
     def _save_settings(self):
         data = {
             "presets": self.presets,
             "master_volume": self.master_volume,
-            "show_waveform": self.show_waveform
+            "show_waveform": self.show_waveform,
         }
         try:
             with open(self.presets_file, "w") as f:
@@ -181,16 +268,23 @@ class SynthesizerView:
         slot_str = str(slot)
         self.presets[slot_str] = [(p.amp, p.active) for p in self.partials]
         self._save_settings()
-        print(f"Saved configuration to Preset {slot} on disk")
+        print(f"Saved configuration ({len(self.partials)} partials) to Preset {slot}")
 
     def load_preset(self, slot):
         slot_str = str(slot)
         config = self.presets.get(slot_str)
         if config:
+            # Handle loading presets that might have a different number of partials
             for i, p in enumerate(self.partials):
-                p.amp, p.active = config[i]
+                if i < len(config):
+                    p.amp, p.active = config[i]
+                else:
+                    p.amp = 0.0
+                    p.active = False
             self._notify_audio()
-            print(f"Loaded Preset {slot}")
+            print(
+                f"Loaded Preset {slot} (mapped {min(len(config), len(self.partials))} partials)"
+            )
 
     def toggle_waveform(self):
         self.show_waveform = not self.show_waveform
@@ -268,30 +362,30 @@ class SynthesizerView:
             pygame.draw.circle(
                 surface, (255, 255, 255), (cx - r // 3, cy - r // 3), max(3, r // 6)
             )
-        pygame.draw.line(
-            surface,
-            self.panel_accent,
-            (self.margin_x, self.base_y),
-            (self.width - self.margin_x, self.base_y),
-            2,
-        )
+        # pygame.draw.line(
+        #     surface,
+        #     self.panel_accent,
+        #     (self.margin_x, self.base_y),
+        #     (self.width - self.margin_x, self.base_y),
+        #     2,
+        # )
 
         # Draw EQ Bars
-        bar_w = max(12, int((self.width - 2 * self.margin_x) / (self.n_partials * 1.6)))
-        y0 = self.height - self.bottom_gutter + 10
-        for i, p in enumerate(self.partials):
-            x = int(self.margin_x + i * self.step)
-            h = int(p.amp * (self.bar_eq_h - 8))
-            color = p.color if p.active else self.inactive
-            pygame.draw.rect(
-                surface,
-                color,
-                (x - bar_w // 2, y0 + (self.bar_eq_h - h), bar_w, h),
-                border_radius=6,
-            )
-            pygame.draw.circle(
-                surface, color, (x, y0 + self.bar_eq_h + 14), self.dot_radius
-            )
+        # bar_w = max(12, int((self.width - 2 * self.margin_x) / (self.n_partials * 1.6)))
+        # y0 = self.height - self.bottom_gutter + 10
+        # for i, p in enumerate(self.partials):
+        #     x = int(self.margin_x + i * self.step)
+        #     h = int(p.amp * (self.bar_eq_h - 8))
+        #     color = p.color if p.active else self.inactive
+        #     pygame.draw.rect(
+        #         surface,
+        #         color,
+        #         (x - bar_w // 2, y0 + (self.bar_eq_h - h), bar_w, h),
+        #         border_radius=6,
+        #     )
+        # pygame.draw.circle(
+        #     surface, color, (x, y0 + self.bar_eq_h + 14), self.dot_radius
+        # )
 
         # Draw Footer Hints
         # txt1 = self.font_small.render("Tap/drag inside a column to set loudness", True, self.muted)

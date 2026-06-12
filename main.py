@@ -9,13 +9,15 @@ from states.synthesizer_state import SynthesizerState
 
 def main():
     pygame.init()
-    audio_engine = AudioEngine()
+
+    n_partials = 8
+    audio_engine = AudioEngine(num_partials=n_partials)
 
     screen = pygame.display.set_mode((1280, 720))
-    pygame.display.set_caption("Additive Synthesizer")
+    pygame.display.set_caption("Additive Synth")
 
     state_manager = StateManager(screen)
-    initial_state = SynthesizerState(state_manager, audio_engine)
+    initial_state = SynthesizerState(state_manager, audio_engine, n_partials=n_partials)
     state_manager.push_state(initial_state)
 
     clock = pygame.time.Clock()
