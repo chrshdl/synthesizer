@@ -3,9 +3,6 @@ import numpy as np
 
 class AudioEngine:
     def __init__(self, frequency=44100, size=-16, channels=1, buffer=512, num_partials=16):
-        pygame.mixer.pre_init(frequency=frequency, size=size, channels=channels, buffer=buffer)
-        pygame.init()
-        
         actual_freq, actual_format, actual_channels = pygame.mixer.get_init()
         
         self.num_partials = num_partials

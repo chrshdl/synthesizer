@@ -8,6 +8,8 @@ from states.synthesizer_state import SynthesizerState
 
 
 def main():
+    # Pre-init mixer with a very low buffer size (128 or 256) to ensure low latency
+    pygame.mixer.pre_init(frequency=44100, size=-16, channels=1, buffer=128)
     pygame.init()
 
     n_partials = 8
