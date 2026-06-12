@@ -25,4 +25,4 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-instrument_cluster = ["assets/**/*", "db/settings.json"]
+additive_synthesizer = ["assets/**/*"]
