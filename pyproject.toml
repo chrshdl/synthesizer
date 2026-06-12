@@ -1,13 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "synthesizer"
 version = "0.1.0"
-description = "Add your description here"
+description = "An additive synthesizer"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
-    "numpy>=2.4.6",
+    "numpy>=2.4.2",
     "pygame>=2.6.1",
+    "pyopengl>=3.1.10",
 ]
 
 [project.scripts]
-synthesizer = "main:main"
+synthesizer = "additive_synthesizer.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+instrument_cluster = ["assets/**/*", "db/settings.json"]

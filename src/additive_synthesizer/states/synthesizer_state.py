@@ -1,5 +1,4 @@
-from ui.views.synthesizer_view import SynthesizerView
-
+from ..ui.views.synthesizer_view import SynthesizerView
 from .state import State
 
 

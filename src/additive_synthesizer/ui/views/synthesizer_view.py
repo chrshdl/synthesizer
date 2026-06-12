@@ -1,69 +1,24 @@
-import json
-import os
 import random
 
 import numpy as np
 import pygame
+from pygame.sprite import LayeredDirty
 
+from ...config import ConfigManager
+from ...core.partial import Partial
 from ..widgets.button_widget import ButtonWidget
 from ..widgets.keyboard_widget import KeyboardWidget
 from ..widgets.slider_widget import SliderWidget
 
 
-class Partial:
-    def __init__(
-        self, idx, x, base_y, color, top_bar_h, bottom_gutter, bar_eq_h, height
-    ):
-        self.idx = idx
-        self.x = x
-        self.base_y = base_y
-        self.amp = 0.0
-        self.color = color
-        self.active = True
-        self.dragging = False
-        self.last_touch_down_t = 0
-        self.touch_down_pos = (0, 0)
-
-        self.top_bar_h = top_bar_h
-        self.bottom_gutter = bottom_gutter
-        self.bar_eq_h = bar_eq_h
-        self.height = height
-
-        self.bubble_min_r = 32
-        self.bubble_max_r = 56
-
-    def bubble_radius(self):
-        return int(
-            self.bubble_min_r + (self.bubble_max_r - self.bubble_min_r) * self.amp
-        )
-
-    def bubble_center(self):
-        y = int(
-            self.base_y
-            - self.amp
-            * (self.height - self.top_bar_h - self.bottom_gutter - self.bar_eq_h - 20)
-        )
-        return (self.x, y)
-
-    def hit_test(self, pos, pad=12):
-        cx, cy = self.bubble_center()
-        px, py = pos
-        r = self.bubble_radius() + pad
-        return (px - cx) ** 2 + (py - cy) ** 2 <= r * r
-
-    def set_amp_from_y(self, y):
-        max_travel = (
-            self.height - self.top_bar_h - self.bottom_gutter - self.bar_eq_h - 20
-        )
-        raw = (self.base_y - y) / max_travel
-        self.amp = max(0.0, min(1.0, raw))
-
-
 class SynthesizerView:
     def __init__(self, audio_engine, n_partials=8):
         self.audio_engine = audio_engine
-        self.width = 1280
-        self.height = 720
+        self.ui_layer = LayeredDirty()
+        self.widget_layer = LayeredDirty()
+
+        self.width = ConfigManager.get_config().width
+        self.height = ConfigManager.get_config().height
         self.n_partials = n_partials
         self.margin_x = 30
         self.bottom_gutter = 250
@@ -102,10 +57,8 @@ class SynthesizerView:
         self.base_y = self.height - self.bottom_gutter
         self.drag_strip_w = int(max(32, self.step * 0.7))
 
-        # Dynamic bubble scaling
         base_min_r = 32
         base_max_r = 56
-        # Reduce size if they would overlap too much
         scale_factor = min(1.0, (self.step * 0.8) / (base_max_r * 2))
 
         self.partials = [
@@ -126,17 +79,38 @@ class SynthesizerView:
             p.bubble_min_r = int(base_min_r * scale_factor)
             p.bubble_max_r = int(base_max_r * scale_factor)
 
-        self.presets_file = "settings.json"
-        # Try to use a persistent path on Buildroot if it exists
-        if os.path.exists("/data/config"):
-            self.presets_file = "/data/config/settings.json"
+        config = self._load_settings()
+        self.presets = config.presets
+        self.master_volume = config.master_volume
+        self.show_waveform = config.show_waveform
+        self.show_keys = config.show_keys
 
-        settings = self._load_settings()
-        self.presets = settings.get("presets", {"1": None, "2": None})
-        self.master_volume = settings.get("master_volume", 0.5)
-        self.show_waveform = settings.get("show_waveform", False)
-        self.show_keys = settings.get("show_keys", False)
+        self.key_freqs = [
+            262,
+            277,
+            294,
+            311,
+            330,
+            349,
+            370,
+            392,
+            415,
+            440,
+            466,
+            494,
+            523,
+        ]
 
+        self._init_ui_elements()
+        self._init_widgets()
+
+        self.active_idx = None
+        self.phase_offset = 0.0
+        self.audio_engine.set_master_volume(self.master_volume)
+        self.audio_engine.set_keys_mode(self.show_keys)
+        self._notify_audio()
+
+    def _init_ui_elements(self):
         btn_w, btn_h, pad = 140, 44, 12
         self.buttons = [
             ButtonWidget(
@@ -207,41 +181,25 @@ class SynthesizerView:
             initial_value=self.master_volume,
             action=self.set_master_volume,
             bg_color=self.bg_color,
-            fill_color=(75, 192, 192),  # Teal
+            fill_color=(75, 192, 192),
+            release_action=self._save_settings,
         )
 
-        self.key_freqs = [
-            262,
-            277,
-            294,
-            311,
-            330,
-            349,
-            370,
-            392,
-            415,
-            440,
-            466,
-            494,
-            523,
-        ]
+        self.ui_layer.add(*self.buttons)
+        self.ui_layer.add(self.vol_slider)
 
+    def _init_widgets(self):
         self.keyboard = KeyboardWidget(
             (self.margin_x, self.height - 160, self.width - 2 * self.margin_x, 150),
             self.on_note_on,
             self.on_note_off,
         )
-
-        self.active_idx = None
-        self.phase_offset = 0.0
-        self.audio_engine.set_master_volume(self.master_volume)
-        self.audio_engine.set_keys_mode(self.show_keys)
-        self._notify_audio()
+        self.keyboard.visible = 1 if self.show_keys else 0
+        self.widget_layer.add(self.keyboard)
 
     def _load_settings(self):
-        # Generate dynamic factory defaults based on current n_partials
-        # The image shows a linear decay, not 1/n.
-        # e.g., for 16 partials, it goes from 1.0 down to ~0.0625 linearly
+        config = ConfigManager.get_config()
+
         sawtooth = [
             ((self.n_partials - i) / self.n_partials, True)
             for i in range(self.n_partials)
@@ -251,63 +209,39 @@ class SynthesizerView:
             for i in range(self.n_partials)
         ]
 
-        defaults = {
-            "presets": {"1": sawtooth, "2": square, "3": None},
-            "master_volume": 0.5,
-            "show_waveform": False,
-        }
-        if os.path.exists(self.presets_file):
-            try:
-                with open(self.presets_file, "r") as f:
-                    data = json.load(f)
-                    # Migrate old format or fill missing slots
-                    if "presets" not in data:
-                        data = {
-                            "presets": {"1": sawtooth, "2": square, "3": None},
-                            "master_volume": 0.5,
-                            "show_waveform": False,
-                        }
+        needs_save = False
+        if not config.presets:
+            config.presets = {"1": sawtooth, "2": square, "3": None}
+            needs_save = True
+        else:
+            if (
+                config.presets.get("1") is None
+                or len(config.presets["1"]) != self.n_partials
+            ):
+                config.presets["1"] = sawtooth
+                needs_save = True
+            if (
+                config.presets.get("2") is None
+                or len(config.presets["2"]) != self.n_partials
+            ):
+                config.presets["2"] = square
+                needs_save = True
+            if "3" not in config.presets:
+                config.presets["3"] = None
+                needs_save = True
 
-                    # Ensure factory defaults are used if slots are empty or length changed
-                    if (
-                        data["presets"].get("1") is None
-                        or len(data["presets"]["1"]) != self.n_partials
-                    ):
-                        data["presets"]["1"] = sawtooth
-                    if (
-                        data["presets"].get("2") is None
-                        or len(data["presets"]["2"]) != self.n_partials
-                    ):
-                        data["presets"]["2"] = square
+        if needs_save:
+            config.write_to_file(ConfigManager.path)
 
-                    if "3" not in data["presets"]:
-                        data["presets"]["3"] = None
-
-                    return data
-            except Exception as e:
-                print(f"Error loading settings: {e}")
-
-        # If no file exists, save the factory defaults immediately
-        try:
-            with open(self.presets_file, "w") as f:
-                json.dump(defaults, f)
-        except Exception:
-            pass
-
-        return defaults
+        return config
 
     def _save_settings(self):
-        data = {
-            "presets": self.presets,
-            "master_volume": self.master_volume,
-            "show_waveform": self.show_waveform,
-            "show_keys": self.show_keys,
-        }
-        try:
-            with open(self.presets_file, "w") as f:
-                json.dump(data, f)
-        except Exception as e:
-            print(f"Error saving settings: {e}")
+        config = ConfigManager.get_config()
+        config.presets = self.presets
+        config.master_volume = self.master_volume
+        config.show_waveform = self.show_waveform
+        config.show_keys = self.show_keys
+        config.write_to_file(ConfigManager.path)
 
     def save_preset(self, slot):
         slot_str = str(slot)
@@ -319,7 +253,6 @@ class SynthesizerView:
         slot_str = str(slot)
         config = self.presets.get(slot_str)
         if config:
-            # Handle loading presets that might have a different number of partials
             for i, p in enumerate(self.partials):
                 if i < len(config):
                     p.amp, p.active = config[i]
@@ -337,6 +270,7 @@ class SynthesizerView:
 
     def toggle_keys(self):
         self.show_keys = not self.show_keys
+        self.keyboard.visible = 1 if self.show_keys else 0
         self.audio_engine.set_keys_mode(self.show_keys)
         self._save_settings()
 
@@ -352,7 +286,6 @@ class SynthesizerView:
     def set_master_volume(self, vol):
         self.master_volume = vol
         self.audio_engine.set_master_volume(vol)
-        self._save_settings()
 
     def _notify_audio(self):
         amps = [p.amp if p.active else 0.0 for p in self.partials]
@@ -368,10 +301,12 @@ class SynthesizerView:
             p.amp = random.random()
         self._notify_audio()
 
+    def draw_static_elements(self, background_surface):
+        pass
+
     def draw(self, surface, background):
         surface.fill(self.bg_color)
 
-        # Draw Waveform Scope (Background)
         if self.show_waveform:
             wf = self.audio_engine.get_current_waveform()
             if wf is not None and len(wf) > 0:
@@ -401,7 +336,6 @@ class SynthesizerView:
                     pygame.draw.lines(scope_surf, (75, 192, 192, 128), False, points, 4)
                     surface.blit(scope_surf, (0, 0))
 
-        # Draw Top Bar
         pygame.draw.rect(surface, self.panel_color, (0, 0, self.width, self.top_bar_h))
         vol_label = self.font_med.render("Volume", True, self.white)
         surface.blit(
@@ -411,12 +345,7 @@ class SynthesizerView:
                 self.top_bar_h // 2 - vol_label.get_height() // 2,
             ),
         )
-        self.vol_slider.draw(surface)
 
-        for b in self.buttons:
-            b.draw(surface)
-
-        # Draw Partials
         for p in self.partials:
             cx, cy = p.bubble_center()
             r = p.bubble_radius()
@@ -426,49 +355,31 @@ class SynthesizerView:
             pygame.draw.circle(
                 surface, (255, 255, 255), (cx - r // 3, cy - r // 3), max(3, r // 6)
             )
-        # pygame.draw.line(
-        #     surface,
-        #     self.panel_accent,
-        #     (self.margin_x, self.base_y),
-        #     (self.width - self.margin_x, self.base_y),
-        #     2,
-        # )
 
-        # Draw EQ Bars
-        # bar_w = max(12, int((self.width - 2 * self.margin_x) / (self.n_partials * 1.6)))
-        # y0 = self.height - self.bottom_gutter + 10
-        # for i, p in enumerate(self.partials):
-        #     x = int(self.margin_x + i * self.step)
-        #     h = int(p.amp * (self.bar_eq_h - 8))
-        #     color = p.color if p.active else self.inactive
-        #     pygame.draw.rect(
-        #         surface,
-        #         color,
-        #         (x - bar_w // 2, y0 + (self.bar_eq_h - h), bar_w, h),
-        #         border_radius=6,
-        #     )
-        # pygame.draw.circle(
-        #     surface, color, (x, y0 + self.bar_eq_h + 14), self.dot_radius
-        # )
+        for sprite in self.widget_layer.sprites():
+            sprite.dirty = 1
+        for sprite in self.ui_layer.sprites():
+            sprite.dirty = 1
 
-        # Draw Keyboard
-        if self.show_keys:
-            self.keyboard.draw(surface)
-
-        # Draw Footer Hints
-        # txt1 = self.font_small.render("Tap/drag inside a column to set loudness", True, self.muted)
-        # txt2 = self.font_small.render("Tap tiny dot to toggle a column ON/OFF | Long-press PRESET 1 to Save", True, self.muted)
-        # surface.blit(txt1, (16, self.height - 28))
-        # surface.blit(txt2, (16, self.height - 52))
+        self.widget_layer.draw(surface)
+        self.ui_layer.draw(surface)
 
         return [surface.get_rect()]
 
     def full_paint(self, surface, background):
+        for sprite in self.widget_layer.sprites():
+            sprite.dirty = 1
+        for sprite in self.ui_layer.sprites():
+            sprite.dirty = 1
+
+        if background:
+            surface.blit(background, (0, 0))
+
         self.draw(surface, background)
 
     def update(self, dt: float):
-        for b in self.buttons:
-            b.update(dt)
+        self.ui_layer.update(dt=dt)
+        self.widget_layer.update(dt=dt)
 
     def nearest_partial_idx_at_x(self, x):
         i = round((x - self.margin_x) / self.step) if self.step > 0 else 0
