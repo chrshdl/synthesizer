@@ -6,6 +6,7 @@ import numpy as np
 import pygame
 
 from ..widgets.button_widget import ButtonWidget
+from ..widgets.keyboard_widget import KeyboardWidget
 from ..widgets.slider_widget import SliderWidget
 
 
@@ -65,7 +66,7 @@ class SynthesizerView:
         self.height = 720
         self.n_partials = n_partials
         self.margin_x = 30
-        self.bottom_gutter = 95
+        self.bottom_gutter = 250
         self.top_bar_h = 64
         self.bar_eq_h = 56
         self.long_press_ms = 600
@@ -134,6 +135,7 @@ class SynthesizerView:
         self.presets = settings.get("presets", {"1": None, "2": None})
         self.master_volume = settings.get("master_volume", 0.5)
         self.show_waveform = settings.get("show_waveform", False)
+        self.show_keys = settings.get("show_keys", False)
 
         btn_w, btn_h, pad = 140, 44, 12
         self.buttons = [
@@ -168,7 +170,6 @@ class SynthesizerView:
                 self.font_med,
                 self.panel_accent,
                 self.white,
-                long_press_action=lambda: self.save_preset(1),
             ),
             ButtonWidget(
                 (16 + 4 * (btn_w + pad), 10, btn_w, btn_h),
@@ -177,12 +178,28 @@ class SynthesizerView:
                 self.font_med,
                 self.panel_accent,
                 self.white,
-                long_press_action=lambda: self.save_preset(2),
+            ),
+            ButtonWidget(
+                (16 + 5 * (btn_w + pad), 10, btn_w, btn_h),
+                "PRESET 1",
+                lambda: self.load_preset(3),
+                self.font_med,
+                self.panel_accent,
+                self.white,
+                long_press_action=lambda: self.save_preset(3),
+            ),
+            ButtonWidget(
+                (16 + 6 * (btn_w + pad), 10, btn_w, btn_h),
+                "KEYS",
+                self.toggle_keys,
+                self.font_med,
+                self.panel_accent,
+                self.white,
             ),
         ]
 
-        slider_w = 160
-        slider_h = 6
+        slider_w = 100
+        slider_h = 8
         slider_x = self.width - slider_w - 32
         slider_y = (self.top_bar_h - slider_h) // 2
         self.vol_slider = SliderWidget(
@@ -193,8 +210,32 @@ class SynthesizerView:
             fill_color=(75, 192, 192),  # Teal
         )
 
+        self.key_freqs = [
+            262,
+            277,
+            294,
+            311,
+            330,
+            349,
+            370,
+            392,
+            415,
+            440,
+            466,
+            494,
+            523,
+        ]
+
+        self.keyboard = KeyboardWidget(
+            (self.margin_x, self.height - 160, self.width - 2 * self.margin_x, 150),
+            self.on_note_on,
+            self.on_note_off,
+        )
+
         self.active_idx = None
+        self.phase_offset = 0.0
         self.audio_engine.set_master_volume(self.master_volume)
+        self.audio_engine.set_keys_mode(self.show_keys)
         self._notify_audio()
 
     def _load_settings(self):
@@ -211,7 +252,7 @@ class SynthesizerView:
         ]
 
         defaults = {
-            "presets": {"1": sawtooth, "2": square},
+            "presets": {"1": sawtooth, "2": square, "3": None},
             "master_volume": 0.5,
             "show_waveform": False,
         }
@@ -222,7 +263,7 @@ class SynthesizerView:
                     # Migrate old format or fill missing slots
                     if "presets" not in data:
                         data = {
-                            "presets": {"1": sawtooth, "2": square},
+                            "presets": {"1": sawtooth, "2": square, "3": None},
                             "master_volume": 0.5,
                             "show_waveform": False,
                         }
@@ -238,6 +279,9 @@ class SynthesizerView:
                         or len(data["presets"]["2"]) != self.n_partials
                     ):
                         data["presets"]["2"] = square
+
+                    if "3" not in data["presets"]:
+                        data["presets"]["3"] = None
 
                     return data
             except Exception as e:
@@ -257,6 +301,7 @@ class SynthesizerView:
             "presets": self.presets,
             "master_volume": self.master_volume,
             "show_waveform": self.show_waveform,
+            "show_keys": self.show_keys,
         }
         try:
             with open(self.presets_file, "w") as f:
@@ -290,6 +335,20 @@ class SynthesizerView:
         self.show_waveform = not self.show_waveform
         self._save_settings()
 
+    def toggle_keys(self):
+        self.show_keys = not self.show_keys
+        self.audio_engine.set_keys_mode(self.show_keys)
+        self._save_settings()
+
+    def on_note_on(self, idx):
+        if idx < len(self.key_freqs):
+            freq = self.key_freqs[idx]
+            self.audio_engine.set_frequency(freq)
+            self.audio_engine.set_gate(True)
+
+    def on_note_off(self):
+        self.audio_engine.set_gate(False)
+
     def set_master_volume(self, vol):
         self.master_volume = vol
         self.audio_engine.set_master_volume(vol)
@@ -317,13 +376,18 @@ class SynthesizerView:
             wf = self.audio_engine.get_current_waveform()
             if wf is not None and len(wf) > 0:
                 samples_to_show = 200
-                segment = wf[:samples_to_show]
+                offset = int(-self.phase_offset) % 200
+                segment = wf[offset : offset + samples_to_show]
                 max_val = np.max(np.abs(segment))
                 display_wf = segment / max_val if max_val > 1e-5 else segment
 
                 points = []
-                center_y = self.height // 2
-                scale_y = self.height * 0.4
+                available_bottom = (
+                    self.height - 160 if self.show_keys else self.height - 50
+                )
+                usable_height = available_bottom - self.top_bar_h
+                center_y = self.top_bar_h + usable_height // 2
+                scale_y = usable_height * 0.4
                 step = samples_to_show / self.width
                 for x in range(self.width):
                     idx = int(x * step)
@@ -339,7 +403,7 @@ class SynthesizerView:
 
         # Draw Top Bar
         pygame.draw.rect(surface, self.panel_color, (0, 0, self.width, self.top_bar_h))
-        vol_label = self.font_big.render("Volume", True, self.white)
+        vol_label = self.font_med.render("Volume", True, self.white)
         surface.blit(
             vol_label,
             (
@@ -387,9 +451,13 @@ class SynthesizerView:
         #     surface, color, (x, y0 + self.bar_eq_h + 14), self.dot_radius
         # )
 
+        # Draw Keyboard
+        if self.show_keys:
+            self.keyboard.draw(surface)
+
         # Draw Footer Hints
         # txt1 = self.font_small.render("Tap/drag inside a column to set loudness", True, self.muted)
-        # txt2 = self.font_small.render("Tap tiny dot to toggle a column ON/OFF | Long-press Presets to Save", True, self.muted)
+        # txt2 = self.font_small.render("Tap tiny dot to toggle a column ON/OFF | Long-press PRESET 1 to Save", True, self.muted)
         # surface.blit(txt1, (16, self.height - 28))
         # surface.blit(txt2, (16, self.height - 52))
 
@@ -420,6 +488,9 @@ class SynthesizerView:
         for b in self.buttons:
             if b.handle_event(ev):
                 return True
+
+        if self.show_keys and self.keyboard.handle_event(ev):
+            return True
 
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button in (1, 0):
             pos = ev.pos
