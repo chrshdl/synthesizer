@@ -101,14 +101,21 @@ class SynthesizerView:
             523,
         ]
 
+        # Setup continuous drone for sound design mode (C4 and E4)
+        self.default_drone_freqs = [self.key_freqs[0], self.key_freqs[4]]
+
         self._init_ui_elements()
         self._init_widgets()
 
         self.active_idx = None
         self.phase_offset = 0.0
         self.audio_engine.set_master_volume(self.master_volume)
-        self.audio_engine.set_keys_mode(self.show_keys)
         self._notify_audio()
+
+        # Trigger the drone immediately if starting with keys hidden
+        if not self.show_keys:
+            for f in self.default_drone_freqs:
+                self.audio_engine.note_on(f)
 
     def _init_ui_elements(self):
         btn_w, btn_h, pad = 140, 44, 12
@@ -199,7 +206,6 @@ class SynthesizerView:
 
     def _load_settings(self):
         config = ConfigManager.get_config()
-
         sawtooth = [
             ((self.n_partials - i) / self.n_partials, True)
             for i in range(self.n_partials)
@@ -232,7 +238,6 @@ class SynthesizerView:
 
         if needs_save:
             config.write_to_file(ConfigManager.path)
-
         return config
 
     def _save_settings(self):
@@ -260,9 +265,7 @@ class SynthesizerView:
                     p.amp = 0.0
                     p.active = False
             self._notify_audio()
-            print(
-                f"Loaded Preset {slot} (mapped {min(len(config), len(self.partials))} partials)"
-            )
+            print(f"Loaded Preset {slot}")
 
     def toggle_waveform(self):
         self.show_waveform = not self.show_waveform
@@ -271,17 +274,36 @@ class SynthesizerView:
     def toggle_keys(self):
         self.show_keys = not self.show_keys
         self.keyboard.visible = 1 if self.show_keys else 0
-        self.audio_engine.set_keys_mode(self.show_keys)
         self._save_settings()
 
+        if self.show_keys:
+            # Entering Performance Mode: Stop the background drone
+            for f in self.default_drone_freqs:
+                self.audio_engine.note_off(f)
+        else:
+            # Entering Sound Design Mode: Clear active keys and start the drone
+            for f in self.key_freqs:
+                self.audio_engine.note_off(f)
+            for f in self.default_drone_freqs:
+                self.audio_engine.note_on(f)
+
     def on_note_on(self, idx):
+        # Ignore external/mouse inputs if keys are hidden
+        if not self.show_keys:
+            return
+
         if idx < len(self.key_freqs):
             freq = self.key_freqs[idx]
-            self.audio_engine.set_frequency(freq)
-            self.audio_engine.set_gate(True)
+            self.audio_engine.note_on(freq)
 
-    def on_note_off(self):
-        self.audio_engine.set_gate(False)
+    def on_note_off(self, idx):
+        # Ignore external/mouse inputs if keys are hidden
+        if not self.show_keys:
+            return
+
+        if idx < len(self.key_freqs):
+            freq = self.key_freqs[idx]
+            self.audio_engine.note_off(freq)
 
     def set_master_volume(self, vol):
         self.master_volume = vol
@@ -301,18 +323,19 @@ class SynthesizerView:
             p.amp = random.random()
         self._notify_audio()
 
-    def draw_static_elements(self, background_surface):
-        pass
-
     def draw(self, surface, background):
         surface.fill(self.bg_color)
 
         if self.show_waveform:
-            wf = self.audio_engine.get_current_waveform()
+            wf = self.audio_engine.sound_arrays.get(self.key_freqs[0])
             if wf is not None and len(wf) > 0:
                 samples_to_show = 200
                 offset = int(-self.phase_offset) % 200
-                segment = wf[offset : offset + samples_to_show]
+                segment = (
+                    wf[offset : offset + samples_to_show, 0]
+                    if wf.ndim == 2
+                    else wf[offset : offset + samples_to_show]
+                )
                 max_val = np.max(np.abs(segment))
                 display_wf = segment / max_val if max_val > 1e-5 else segment
 
@@ -324,6 +347,7 @@ class SynthesizerView:
                 center_y = self.top_bar_h + usable_height // 2
                 scale_y = usable_height * 0.4
                 step = samples_to_show / self.width
+
                 for x in range(self.width):
                     idx = int(x * step)
                     y = center_y - int(display_wf[idx] * scale_y)
@@ -363,7 +387,6 @@ class SynthesizerView:
 
         self.widget_layer.draw(surface)
         self.ui_layer.draw(surface)
-
         return [surface.get_rect()]
 
     def full_paint(self, surface, background):
@@ -374,7 +397,6 @@ class SynthesizerView:
 
         if background:
             surface.blit(background, (0, 0))
-
         self.draw(surface, background)
 
     def update(self, dt: float):
@@ -395,11 +417,9 @@ class SynthesizerView:
     def handle_event(self, ev):
         if self.vol_slider.handle_event(ev):
             return True
-
         for b in self.buttons:
             if b.handle_event(ev):
                 return True
-
         if self.show_keys and self.keyboard.handle_event(ev):
             return True
 

@@ -33,9 +33,9 @@ def run(conf: Config) -> None:
     signal.signal(signal.SIGTERM, handle_exit)
 
     # pre-init mixer with a very low buffer size (128 or 256) to ensure low latency
-    pygame.mixer.pre_init(frequency=44100, size=-16, channels=1, buffer=256)
+    pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=512)
     pygame.init()
-    pygame.mouse.set_visible(False)
+    pygame.mouse.set_visible(True)
 
     use_hardware_renderer = is_raspberry_pi_4()
     gpu_renderer = None
@@ -69,6 +69,25 @@ def run(conf: Config) -> None:
 
         clock = pygame.time.Clock()
 
+        # --- QWERTY Polyphony Mapping ---
+        # A S D F G H J K L ; ' = C4 to C5 white keys
+        # W E T Y U O P = Black keys
+        qwerty_mapping = {
+            pygame.K_a: 0,
+            pygame.K_w: 1,
+            pygame.K_s: 2,
+            pygame.K_e: 3,
+            pygame.K_d: 4,
+            pygame.K_f: 5,
+            pygame.K_t: 6,
+            pygame.K_g: 7,
+            pygame.K_y: 8,
+            pygame.K_h: 9,
+            pygame.K_u: 10,
+            pygame.K_j: 11,
+            pygame.K_k: 12,
+        }
+
         while state_manager.is_running:
             # calculate delta time (targeting 60 fps)
             dt = clock.tick(60) / 1000.0
@@ -76,7 +95,26 @@ def run(conf: Config) -> None:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     state_manager.is_running = False
+
+                # Let the UI handle standard events first (like mouse clicks)
                 state_manager.handle_event(event)
+
+                # --- Handle QWERTY Intercepts ---
+                if event.type == pygame.KEYDOWN and event.key in qwerty_mapping:
+                    idx = qwerty_mapping[event.key]
+                    # Add to the visual set
+                    initial_state.view.keyboard.active_indices.add(idx)
+                    initial_state.view.keyboard._rebuild_image()
+                    # Trigger audio
+                    initial_state.view.on_note_on(idx)
+
+                elif event.type == pygame.KEYUP and event.key in qwerty_mapping:
+                    idx = qwerty_mapping[event.key]
+                    # Remove from the visual set
+                    initial_state.view.keyboard.active_indices.discard(idx)
+                    initial_state.view.keyboard._rebuild_image()
+                    # Stop audio
+                    initial_state.view.on_note_off(idx)
 
             state_manager.update(dt)
             dirty_rects = state_manager.draw(main_surface)
