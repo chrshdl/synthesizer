@@ -318,6 +318,15 @@ class SynthesizerView:
             p.amp = 0.0
         self._notify_audio()
 
+        # kill all currently playing channels
+        self.audio_engine.all_notes_off()
+
+        # clear the UI keyboard state to un-grey any stuck keys
+        if hasattr(self, "keyboard"):
+            self.keyboard.active_indices.clear()
+            self.keyboard.mouse_active_idx = None
+            self.keyboard._rebuild_image()
+
     def randomize(self):
         for p in self.partials:
             p.amp = random.random()

@@ -115,3 +115,11 @@ class AudioEngine:
             # 200ms fade out simulates natural decay and prevents clicking
             self.active_channels[freq].fadeout(200)
             del self.active_channels[freq]
+
+    def all_notes_off(self):
+        """
+        Clear all playing channels
+        """
+        for _, channel in list(self.active_channels.items()):
+            channel.fadeout(200)
+        self.active_channels.clear()
