@@ -6,12 +6,13 @@ from pygame.sprite import LayeredDirty
 
 from ...config import ConfigManager
 from ...core.partial import Partial
+from ...logger import Logger
+from ...ui.utils.font import FontFamily, load_font
+from ..utils.input import get_event_pos, is_primary_click, is_touch_event
 from ..widgets.button_widget import ButtonWidget
 from ..widgets.keyboard_widget import KeyboardWidget
 from ..widgets.slider_widget import SliderWidget
 
-
-from ..utils.input import get_event_pos, is_primary_click, is_touch_event
 
 class SynthesizerView:
     def __init__(self, audio_engine, n_partials=8):
@@ -22,9 +23,12 @@ class SynthesizerView:
         self.width = ConfigManager.get_config().width
         self.height = ConfigManager.get_config().height
         self.n_partials = n_partials
+
+        self.logger = Logger(__class__.__name__).get()
+
         self.margin_x = 30
-        self.bottom_gutter = 250
-        self.top_bar_h = 64
+        self.bottom_gutter = 350
+        self.top_bar_h = 80
         self.bar_eq_h = 56
         self.long_press_ms = 600
         self.long_press_move_tol = 14
@@ -48,25 +52,27 @@ class SynthesizerView:
             (255, 111, 181),
         ]
 
-        self.font_small = pygame.font.SysFont("Inter", 18)
-        self.font_med = pygame.font.SysFont("Inter", 22, bold=True)
-        self.font_big = pygame.font.SysFont("Inter", 28, bold=True)
+        self.font_med = load_font(size=22, family=FontFamily.D_DIN_EXP_BOLD)
 
-        usable_w = self.width - 2 * self.margin_x
+        base_min_r = 32
+        base_max_r = 56
+
+        self.bubble_margin_x = base_max_r + 16
+
+        usable_w = self.width - 2 * self.bubble_margin_x
+
         self.step = (
             usable_w / (self.n_partials - 1) if self.n_partials > 1 else usable_w
         )
         self.base_y = self.height - self.bottom_gutter
         self.drag_strip_w = int(max(32, self.step * 0.7))
 
-        base_min_r = 32
-        base_max_r = 56
         scale_factor = min(1.0, (self.step * 0.8) / (base_max_r * 2))
 
         self.partials = [
             Partial(
                 i,
-                int(self.margin_x + i * self.step),
+                int(self.bubble_margin_x + i * self.step),  # Use bubble margin here
                 self.base_y,
                 self.palette[i % len(self.palette)],
                 self.top_bar_h,
@@ -103,8 +109,8 @@ class SynthesizerView:
             523,
         ]
 
-        # Setup continuous drone for sound design mode (C4 and E4)
-        self.default_drone_freqs = [self.key_freqs[0], self.key_freqs[4]]
+        # self.default_drone_freqs = [self.key_freqs[0], self.key_freqs[4]]
+        self.default_drone_freqs = [self.key_freqs[0]]
 
         self._init_ui_elements()
         self._init_widgets()
@@ -114,16 +120,18 @@ class SynthesizerView:
         self.audio_engine.set_master_volume(self.master_volume)
         self._notify_audio()
 
-        # Trigger the drone immediately if starting with keys hidden
         if not self.show_keys:
             for f in self.default_drone_freqs:
                 self.audio_engine.note_on(f)
 
     def _init_ui_elements(self):
-        btn_w, btn_h, pad = 140, 44, 12
+        btn_w, btn_h, pad = 140, 60, 12
+
+        btn_y = (self.top_bar_h - btn_h) // 2
+
         self.buttons = [
             ButtonWidget(
-                (16, 10, btn_w, btn_h),
+                (16, btn_y, btn_w, btn_h),
                 "MUTE ALL",
                 self.mute_all,
                 self.font_med,
@@ -131,31 +139,23 @@ class SynthesizerView:
                 self.white,
             ),
             ButtonWidget(
-                (16 + (btn_w + pad), 10, btn_w, btn_h),
-                "RANDOMIZE",
+                (16 + (btn_w + pad), btn_y, btn_w, btn_h),
+                "RANDOM",
                 self.randomize,
                 self.font_med,
                 self.panel_accent,
                 self.white,
             ),
             ButtonWidget(
-                (16 + 2 * (btn_w + pad), 10, btn_w, btn_h),
-                "WAVEFORM",
-                self.toggle_waveform,
-                self.font_med,
-                self.panel_accent,
-                self.white,
-            ),
-            ButtonWidget(
-                (16 + 3 * (btn_w + pad), 10, btn_w, btn_h),
-                "SAWTOOTH",
+                (16 + 2 * (btn_w + pad), btn_y, btn_w, btn_h),
+                "SAW",
                 lambda: self.load_preset(1),
                 self.font_med,
                 self.panel_accent,
                 self.white,
             ),
             ButtonWidget(
-                (16 + 4 * (btn_w + pad), 10, btn_w, btn_h),
+                (16 + 3 * (btn_w + pad), btn_y, btn_w, btn_h),
                 "SQUARE",
                 lambda: self.load_preset(2),
                 self.font_med,
@@ -163,7 +163,7 @@ class SynthesizerView:
                 self.white,
             ),
             ButtonWidget(
-                (16 + 5 * (btn_w + pad), 10, btn_w, btn_h),
+                (16 + 4 * (btn_w + pad), btn_y, btn_w, btn_h),
                 "PRESET 1",
                 lambda: self.load_preset(3),
                 self.font_med,
@@ -172,7 +172,7 @@ class SynthesizerView:
                 long_press_action=lambda: self.save_preset(3),
             ),
             ButtonWidget(
-                (16 + 6 * (btn_w + pad), 10, btn_w, btn_h),
+                (16 + 5 * (btn_w + pad), btn_y, btn_w, btn_h),
                 "KEYS",
                 self.toggle_keys,
                 self.font_med,
@@ -181,8 +181,8 @@ class SynthesizerView:
             ),
         ]
 
-        slider_w = 100
-        slider_h = 8
+        slider_w = 200
+        slider_h = 36
         slider_x = self.width - slider_w - 32
         slider_y = (self.top_bar_h - slider_h) // 2
         self.vol_slider = SliderWidget(
@@ -199,7 +199,7 @@ class SynthesizerView:
 
     def _init_widgets(self):
         self.keyboard = KeyboardWidget(
-            (self.margin_x, self.height - 160, self.width - 2 * self.margin_x, 150),
+            (self.margin_x, self.height - 300, self.width - 2 * self.margin_x, 280),
             self.on_note_on,
             self.on_note_off,
         )
@@ -254,7 +254,9 @@ class SynthesizerView:
         slot_str = str(slot)
         self.presets[slot_str] = [(p.amp, p.active) for p in self.partials]
         self._save_settings()
-        print(f"Saved configuration ({len(self.partials)} partials) to Preset {slot}")
+        self.logger.info(
+            f"Saved configuration ({len(self.partials)} partials) to Preset {slot}"
+        )
 
     def load_preset(self, slot):
         slot_str = str(slot)
@@ -267,7 +269,7 @@ class SynthesizerView:
                     p.amp = 0.0
                     p.active = False
             self._notify_audio()
-            print(f"Loaded Preset {slot}")
+            self.logger.info(f"Loaded Preset {slot}")
 
     def toggle_waveform(self):
         self.show_waveform = not self.show_waveform
@@ -279,18 +281,15 @@ class SynthesizerView:
         self._save_settings()
 
         if self.show_keys:
-            # Entering Performance Mode: Stop the background drone
             for f in self.default_drone_freqs:
                 self.audio_engine.note_off(f)
         else:
-            # Entering Sound Design Mode: Clear active keys and start the drone
             for f in self.key_freqs:
                 self.audio_engine.note_off(f)
             for f in self.default_drone_freqs:
                 self.audio_engine.note_on(f)
 
     def on_note_on(self, idx):
-        # Ignore external/mouse inputs if keys are hidden
         if not self.show_keys:
             return
 
@@ -299,7 +298,6 @@ class SynthesizerView:
             self.audio_engine.note_on(freq)
 
     def on_note_off(self, idx):
-        # Ignore external/mouse inputs if keys are hidden
         if not self.show_keys:
             return
 
@@ -319,11 +317,8 @@ class SynthesizerView:
         for p in self.partials:
             p.amp = 0.0
         self._notify_audio()
-
-        # kill all currently playing channels
         self.audio_engine.all_notes_off()
 
-        # clear the UI keyboard state to un-grey any stuck keys
         if hasattr(self, "keyboard"):
             self.keyboard.active_indices.clear()
             self.keyboard.active_pointers.clear()
@@ -352,7 +347,7 @@ class SynthesizerView:
 
                 points = []
                 available_bottom = (
-                    self.height - 160 if self.show_keys else self.height - 50
+                    self.height - 310 if self.show_keys else self.height - 50
                 )
                 usable_height = available_bottom - self.top_bar_h
                 center_y = self.top_bar_h + usable_height // 2
@@ -415,11 +410,13 @@ class SynthesizerView:
         self.widget_layer.update(dt=dt)
 
     def nearest_partial_idx_at_x(self, x):
-        i = round((x - self.margin_x) / self.step) if self.step > 0 else 0
+        # Updated to use bubble_margin_x
+        i = round((x - self.bubble_margin_x) / self.step) if self.step > 0 else 0
         return max(0, min(self.n_partials - 1, i))
 
     def column_rect_for_idx(self, i):
-        cx = int(self.margin_x + i * self.step)
+        # Updated to use bubble_margin_x
+        cx = int(self.bubble_margin_x + i * self.step)
         half = self.drag_strip_w // 2
         return pygame.Rect(
             cx - half, self.top_bar_h, self.drag_strip_w, self.base_y - self.top_bar_h
@@ -440,11 +437,14 @@ class SynthesizerView:
 
         pointer_id = getattr(ev, "finger_id", 0) if is_touch_event(ev) else 0
 
-        if (ev.type == pygame.MOUSEBUTTONDOWN and is_primary_click(ev)) or ev.type == pygame.FINGERDOWN:
+        if (
+            ev.type == pygame.MOUSEBUTTONDOWN and is_primary_click(ev)
+        ) or ev.type == pygame.FINGERDOWN:
             px, py = pos
             y0 = self.height - self.bottom_gutter + 10
             for i, p in enumerate(self.partials):
-                x = int(self.margin_x + i * self.step)
+                # Updated to use bubble_margin_x
+                x = int(self.bubble_margin_x + i * self.step)
                 dot_rect = pygame.Rect(
                     x - (self.dot_radius + 4),
                     y0 + self.bar_eq_h + 6,
@@ -481,12 +481,13 @@ class SynthesizerView:
                     return True
             return False
 
-        elif (ev.type == pygame.MOUSEBUTTONUP and is_primary_click(ev)) or ev.type == pygame.FINGERUP:
+        elif (
+            ev.type == pygame.MOUSEBUTTONUP and is_primary_click(ev)
+        ) or ev.type == pygame.FINGERUP:
             if self.active_idx is None:
                 return False
             p = self.partials[self.active_idx]
-            
-            # Ensure we only release if it's the same pointer
+
             if getattr(p, "active_pointer", 0) != pointer_id:
                 return False
 
@@ -504,10 +505,12 @@ class SynthesizerView:
         elif ev.type == pygame.MOUSEMOTION or ev.type == pygame.FINGERMOTION:
             if self.active_idx is not None:
                 p = self.partials[self.active_idx]
-                # For motion, check pointer if it's a finger
-                if ev.type == pygame.FINGERMOTION and getattr(p, "active_pointer", 0) != pointer_id:
+                if (
+                    ev.type == pygame.FINGERMOTION
+                    and getattr(p, "active_pointer", 0) != pointer_id
+                ):
                     return False
-                
+
                 if p.dragging:
                     p.set_amp_from_y(pos[1])
                     self._notify_audio()
