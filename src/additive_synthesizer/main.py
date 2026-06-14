@@ -1,10 +1,14 @@
+import os
 import signal
 import sys
+
+os.environ["SDL_AUDIODRIVER"] = "alsa"
 
 import pygame
 
 from .config import Config, ConfigManager
 from .core.audio_engine import AudioEngine
+from .core.drum_engine import DrumEngine
 from .core.system_health_monitor import SystemHealthMonitor
 from .logger import Logger
 from .states.state_manager import StateManager
@@ -34,12 +38,12 @@ def run(conf: Config) -> None:
     signal.signal(signal.SIGTERM, handle_exit)
 
     # pre-init mixer with a very low buffer size (128 or 256) to ensure low latency
-    pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=512)
+    pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=256)
     pygame.mixer.init(
         frequency=44100,
         size=-16,
         channels=2,
-        buffer=512,
+        buffer=256,
         allowedchanges=0,
     )
     pygame.init()
@@ -69,6 +73,7 @@ def run(conf: Config) -> None:
 
         n_partials = 8
         audio_engine = AudioEngine(num_partials=n_partials)
+        drum_engine = DrumEngine()
 
         initial_state = SynthesizerState(
             state_manager=state_manager,
@@ -115,6 +120,7 @@ def run(conf: Config) -> None:
 
                 # Let the UI handle standard events first (like mouse clicks)
                 state_manager.handle_event(event)
+                drum_engine.handle_event(event)
 
                 # --- Handle QWERTY Intercepts ---
                 if event.type == pygame.KEYDOWN and event.key in qwerty_mapping:
