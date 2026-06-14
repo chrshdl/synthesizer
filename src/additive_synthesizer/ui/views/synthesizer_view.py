@@ -118,6 +118,9 @@ class SynthesizerView:
         self.active_idx = None
         self.phase_offset = 0.0
         self.audio_engine.set_master_volume(self.master_volume)
+
+        self.audio_needs_update = False
+
         self._notify_audio()
 
         if not self.show_keys:
@@ -217,6 +220,17 @@ class SynthesizerView:
             for i in range(self.n_partials)
         ]
 
+        brass = [
+            (1.0, True),
+            (0.8, True),
+            (0.6, True),
+            (0.5, True),
+            (0.4, True),
+            (0.3, True),
+            (0.2, True),
+            (0.1, True),
+        ]
+
         needs_save = False
         if not config.presets:
             config.presets = {"1": sawtooth, "2": square, "3": None}
@@ -235,7 +249,7 @@ class SynthesizerView:
                 config.presets["2"] = square
                 needs_save = True
             if "3" not in config.presets:
-                config.presets["3"] = None
+                config.presets["3"] = brass
                 needs_save = True
 
         if needs_save:
@@ -268,7 +282,7 @@ class SynthesizerView:
                 else:
                     p.amp = 0.0
                     p.active = False
-            self._notify_audio()
+            self.audio_needs_update = True
             self.logger.info(f"Loaded Preset {slot}")
 
     def toggle_waveform(self):
@@ -307,7 +321,8 @@ class SynthesizerView:
 
     def set_master_volume(self, vol):
         self.master_volume = vol
-        self.audio_engine.set_master_volume(vol)
+        self.audio_engine.master_volume = vol
+        self.audio_needs_update = True
 
     def _notify_audio(self):
         amps = [p.amp if p.active else 0.0 for p in self.partials]
@@ -316,7 +331,7 @@ class SynthesizerView:
     def mute_all(self):
         for p in self.partials:
             p.amp = 0.0
-        self._notify_audio()
+        self.audio_needs_update = True
         self.audio_engine.all_notes_off()
 
         if hasattr(self, "keyboard"):
@@ -327,7 +342,7 @@ class SynthesizerView:
     def randomize(self):
         for p in self.partials:
             p.amp = random.random()
-        self._notify_audio()
+        self.audio_needs_update = True
 
     def draw(self, surface, background):
         surface.fill(self.bg_color)
@@ -409,6 +424,11 @@ class SynthesizerView:
         self.ui_layer.update(dt=dt)
         self.widget_layer.update(dt=dt)
 
+        # only recalculate audio once per frame
+        if self.audio_needs_update:
+            self._notify_audio()
+            self.audio_needs_update = False
+
     def nearest_partial_idx_at_x(self, x):
         # Updated to use bubble_margin_x
         i = round((x - self.bubble_margin_x) / self.step) if self.step > 0 else 0
@@ -453,7 +473,7 @@ class SynthesizerView:
                 )
                 if dot_rect.collidepoint(pos):
                     p.active = not p.active
-                    self._notify_audio()
+                    self.audio_needs_update = True
                     return True
 
             idx = self.nearest_partial_idx_at_x(px)
@@ -497,7 +517,7 @@ class SynthesizerView:
             held_ms = pygame.time.get_ticks() - p.last_touch_down_t
             if (not moved) and held_ms >= self.long_press_ms:
                 p.amp = 0.0
-                self._notify_audio()
+                self.audio_needs_update = True
             p.dragging = False
             self.active_idx = None
             return True
@@ -513,6 +533,6 @@ class SynthesizerView:
 
                 if p.dragging:
                     p.set_amp_from_y(pos[1])
-                    self._notify_audio()
+                    self.audio_needs_update = True
                 return True
         return False
