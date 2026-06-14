@@ -5,6 +5,7 @@ import pygame
 
 from .config import Config, ConfigManager
 from .core.audio_engine import AudioEngine
+from .core.system_health_monitor import SystemHealthMonitor
 from .logger import Logger
 from .states.state_manager import StateManager
 from .states.synthesizer_state import SynthesizerState
@@ -34,6 +35,13 @@ def run(conf: Config) -> None:
 
     # pre-init mixer with a very low buffer size (128 or 256) to ensure low latency
     pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=512)
+    pygame.mixer.init(
+        frequency=44100,
+        size=-16,
+        channels=2,
+        buffer=512,
+        allowedchanges=0,
+    )
     pygame.init()
     pygame.mouse.set_visible(True)
 
@@ -56,6 +64,9 @@ def run(conf: Config) -> None:
 
         state_manager = StateManager(main_surface)
 
+        # Initialize system health monitor
+        health = SystemHealthMonitor()
+
         n_partials = 8
         audio_engine = AudioEngine(num_partials=n_partials)
 
@@ -66,6 +77,9 @@ def run(conf: Config) -> None:
         )
 
         state_manager.push_state(initial_state)
+
+        # notify systemd that initialization is complete
+        health.notify_ready()
 
         clock = pygame.time.Clock()
 
@@ -91,6 +105,9 @@ def run(conf: Config) -> None:
         while state_manager.is_running:
             # calculate delta time (targeting 60 fps)
             dt = clock.tick(60) / 1000.0
+
+            # update system health (watchdog tick)
+            health.update(dt)
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:

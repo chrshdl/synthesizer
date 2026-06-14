@@ -3,10 +3,8 @@ import pygame
 
 
 class AudioEngine:
-    def __init__(
-        self, frequency=44100, size=-16, channels=1, buffer=512, num_partials=8
-    ):
-        # Initialize mixer with 16 dedicated channels for polyphony
+    def __init__(self, num_partials=8):
+        # we need at least 13 channels for our 13 keys (C4 to C5)
         pygame.mixer.set_num_channels(16)
         actual_freq, actual_format, actual_channels = pygame.mixer.get_init()
 
@@ -14,7 +12,6 @@ class AudioEngine:
         self.sr = actual_freq
         self.length = actual_freq  # 1 second buffer for perfect loops
 
-        # 1 Octave integer frequencies: C4 to C5
         self.key_freqs = [
             262,
             277,
@@ -36,45 +33,38 @@ class AudioEngine:
         self.freq_partials = {}
         self.sounds = {}
         self.sound_arrays = {}
-        self.active_channels = {}  # Tracks which channel is playing which freq
 
-        # Determine shape based on stereo/mono
+        # hardware voice architecture
+        self.freq_channels = {}
+        self.active_notes = set()
+
         self.buffer_shape = (self.length, 2) if actual_channels == 2 else (self.length,)
         self.actual_channels = actual_channels
 
-        # Precompute the thickened wavetables for all keys
-        for f in self.key_freqs:
+        # precompute the thickened wavetables for all keys
+        for i, f in enumerate(self.key_freqs):
             partials = []
-            for i in range(self.num_partials):
-                base_f = f * (i + 1)
+            for p_idx in range(self.num_partials):
+                base_f = f * (p_idx + 1)
 
-                # Faster, scaled integer detuning.
-                # The fundamental gets a 3Hz beat, the next gets 4Hz, then 5Hz, etc.
-                # This speeds up the oscillation and mimics natural inharmonicity!
-                detune_hz = 3 + i
-
-                # Integer Detuning: Base wave + faster beating voices
+                detune_hz = 3 + p_idx
                 wave_center = np.sin(2 * np.pi * base_f * t)
                 wave_sharp = np.sin(2 * np.pi * (base_f + detune_hz) * t) * 0.4
                 wave_flat = np.sin(2 * np.pi * (base_f - detune_hz) * t) * 0.4
-
-                # Mix them together into a single "thick" partial
                 thick_wave = (wave_center + wave_sharp + wave_flat) / 1.8
                 partials.append(thick_wave)
 
-            # Store the raw float arrays
             self.freq_partials[f] = np.array(partials, dtype=np.float32)
 
-            # Create a Pygame Sound object for this specific key
             sound = pygame.mixer.Sound(np.zeros(self.buffer_shape, dtype=np.int16))
             self.sounds[f] = sound
             self.sound_arrays[f] = pygame.sndarray.samples(sound)
 
-        self.master_volume = 0.5
-        # Start with just the fundamental frequency at max volume
-        self.current_amps = [1.0] + [0.0] * (self.num_partials - 1)
+            # permanently assign a dedicated pygame channel (0 - 12)
+            self.freq_channels[f] = pygame.mixer.Channel(i)
 
-        # Initialize the buffers with the default amplitude
+        self.master_volume = 0.5
+        self.current_amps = [1.0] + [0.0] * (self.num_partials - 1)
         self.update_amplitudes(self.current_amps)
 
     def set_master_volume(self, vol: float):
@@ -87,7 +77,6 @@ class AudioEngine:
         self.current_amps = amps
         amps_arr = np.array(amps, dtype=np.float32).reshape(self.num_partials, 1)
 
-        # Instantly update the wavetables for ALL keys simultaneously
         for f in self.key_freqs:
             waveform = (
                 np.sum(amps_arr * self.freq_partials[f], axis=0) / self.num_partials
@@ -102,24 +91,23 @@ class AudioEngine:
                 self.sound_arrays[f][:] = int_waveform
 
     def note_on(self, freq: int):
-        if freq in self.sounds and freq not in self.active_channels:
-            # Find an available channel and play the specific sound for this frequency
-            channel = pygame.mixer.find_channel()
-            if channel:
-                # 20ms fade in prevents popping on attack
-                channel.play(self.sounds[freq], loops=-1, fade_ms=20)
-                self.active_channels[freq] = channel
+        if freq in self.sounds and freq not in self.active_notes:
+            self.active_notes.add(freq)
+            # call the dedicated channel directly
+            channel = self.freq_channels[freq]
+            channel.set_volume(1.0)  # ensure volume is maxed
+            channel.play(
+                self.sounds[freq], loops=-1
+            )  # no fade_ms prevents collision bugs
 
     def note_off(self, freq: int):
-        if freq in self.active_channels:
-            # 200ms fade out simulates natural decay and prevents clicking
-            self.active_channels[freq].fadeout(200)
-            del self.active_channels[freq]
+        if freq in self.active_notes:
+            self.active_notes.remove(freq)
+            # 200ms fadeout stops pops on release
+            self.freq_channels[freq].fadeout(200)
 
     def all_notes_off(self):
-        """
-        Clear all playing channels
-        """
-        for _, channel in list(self.active_channels.items()):
-            channel.fadeout(200)
-        self.active_channels.clear()
+        """Nuclear panic function. Instantly kills all dedicated channels."""
+        for channel in self.freq_channels.values():
+            channel.stop()  # hard stop bypassing fadeouts
+        self.active_notes.clear()
