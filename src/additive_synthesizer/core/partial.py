@@ -11,6 +11,7 @@ class Partial:
         self.dragging = False
         self.last_touch_down_t = 0
         self.touch_down_pos = (0, 0)
+        self.active_pointer = None
 
         self.top_bar_h = top_bar_h
         self.bottom_gutter = bottom_gutter

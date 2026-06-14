@@ -1,6 +1,7 @@
 import pygame
 from pygame.sprite import DirtySprite
 
+from ..utils.input import get_event_pos, is_primary_click
 
 class KeyboardWidget(DirtySprite):
     def __init__(self, rect, action_note_on, action_note_off):
@@ -12,8 +13,8 @@ class KeyboardWidget(DirtySprite):
 
         # Track multiple visual keys for polyphony
         self.active_indices = set()
-        # Track single mouse interactions
-        self.mouse_active_idx = None
+        # Track active pointers (mouse/fingers) to note indices
+        self.active_pointers = {} # pointer_id -> note_idx
 
         self.white_indices = [0, 2, 4, 5, 7, 9, 11, 12]
         self.black_indices = [1, 3, None, 6, 8, 10, None]
@@ -69,42 +70,53 @@ class KeyboardWidget(DirtySprite):
         return None
 
     def handle_event(self, ev):
-        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button in (1, 0):
-            if self.rect.collidepoint(ev.pos):
-                note = self.get_note_at(ev.pos)
-                if note is not None:
-                    self.mouse_active_idx = note
-                    self.active_indices.add(note)
-                    self._rebuild_image()
-                    self.action_note_on(note)
-                    return True
+        pos = get_event_pos(ev)
+        if pos is None:
+            return False
 
-        elif ev.type == pygame.MOUSEBUTTONUP and ev.button in (1, 0):
-            if self.mouse_active_idx is not None:
-                released_idx = self.mouse_active_idx
-                self.mouse_active_idx = None
-                self.active_indices.discard(released_idx)
+        pointer_id = getattr(ev, "finger_id", 0) if ev.type in (pygame.FINGERDOWN, pygame.FINGERUP, pygame.FINGERMOTION) else 0
+
+        if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
+            if is_primary_click(ev):
+                if self.rect.collidepoint(pos):
+                    note = self.get_note_at(pos)
+                    if note is not None:
+                        self.active_pointers[pointer_id] = note
+                        self.active_indices.add(note)
+                        self._rebuild_image()
+                        self.action_note_on(note)
+                        return True
+
+        elif ev.type in (pygame.MOUSEBUTTONUP, pygame.FINGERUP):
+            if pointer_id in self.active_pointers:
+                released_idx = self.active_pointers.pop(pointer_id)
+                # Only discard from active_indices if no other pointer is pressing this note
+                if released_idx not in self.active_pointers.values():
+                    self.active_indices.discard(released_idx)
                 self._rebuild_image()
                 self.action_note_off(released_idx)
                 return True
 
-        elif ev.type == pygame.MOUSEMOTION:
-            if self.mouse_active_idx is not None:
-                note = self.get_note_at(ev.pos)
-                if note != self.mouse_active_idx:
+        elif ev.type in (pygame.MOUSEMOTION, pygame.FINGERMOTION):
+            if pointer_id in self.active_pointers:
+                note = self.get_note_at(pos)
+                if note != self.active_pointers[pointer_id]:
                     # Release the old note
-                    released_idx = self.mouse_active_idx
-                    self.active_indices.discard(released_idx)
-                    self.action_note_off(released_idx)
-
+                    released_idx = self.active_pointers[pointer_id]
+                    
                     if note is None:
-                        self.mouse_active_idx = None
+                        del self.active_pointers[pointer_id]
                     else:
                         # Press the new note
-                        self.mouse_active_idx = note
+                        self.active_pointers[pointer_id] = note
                         self.active_indices.add(note)
                         self.action_note_on(note)
-
+                    
+                    # Clean up visual state for released_idx
+                    if released_idx not in self.active_pointers.values():
+                        self.active_indices.discard(released_idx)
+                    
+                    self.action_note_off(released_idx)
                     self._rebuild_image()
                 return True
         return False

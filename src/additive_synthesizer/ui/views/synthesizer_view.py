@@ -11,6 +11,8 @@ from ..widgets.keyboard_widget import KeyboardWidget
 from ..widgets.slider_widget import SliderWidget
 
 
+from ..utils.input import get_event_pos, is_primary_click, is_touch_event
+
 class SynthesizerView:
     def __init__(self, audio_engine, n_partials=8):
         self.audio_engine = audio_engine
@@ -324,7 +326,7 @@ class SynthesizerView:
         # clear the UI keyboard state to un-grey any stuck keys
         if hasattr(self, "keyboard"):
             self.keyboard.active_indices.clear()
-            self.keyboard.mouse_active_idx = None
+            self.keyboard.active_pointers.clear()
             self.keyboard._rebuild_image()
 
     def randomize(self):
@@ -432,8 +434,13 @@ class SynthesizerView:
         if self.show_keys and self.keyboard.handle_event(ev):
             return True
 
-        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button in (1, 0):
-            pos = ev.pos
+        pos = get_event_pos(ev, self.width, self.height)
+        if pos is None:
+            return False
+
+        pointer_id = getattr(ev, "finger_id", 0) if is_touch_event(ev) else 0
+
+        if (ev.type == pygame.MOUSEBUTTONDOWN and is_primary_click(ev)) or ev.type == pygame.FINGERDOWN:
             px, py = pos
             y0 = self.height - self.bottom_gutter + 10
             for i, p in enumerate(self.partials):
@@ -456,6 +463,7 @@ class SynthesizerView:
                 p.dragging = True
                 p.last_touch_down_t = pygame.time.get_ticks()
                 p.touch_down_pos = pos
+                p.active_pointer = pointer_id
                 p.set_amp_from_y(py)
                 self.active_idx = idx
                 self._notify_audio()
@@ -466,18 +474,24 @@ class SynthesizerView:
                     p.dragging = True
                     p.last_touch_down_t = pygame.time.get_ticks()
                     p.touch_down_pos = pos
+                    p.active_pointer = pointer_id
                     self.active_idx = i
                     p.set_amp_from_y(py)
                     self._notify_audio()
                     return True
             return False
 
-        elif ev.type == pygame.MOUSEBUTTONUP and ev.button in (1, 0):
+        elif (ev.type == pygame.MOUSEBUTTONUP and is_primary_click(ev)) or ev.type == pygame.FINGERUP:
             if self.active_idx is None:
                 return False
             p = self.partials[self.active_idx]
-            dx = ev.pos[0] - p.touch_down_pos[0]
-            dy = ev.pos[1] - p.touch_down_pos[1]
+            
+            # Ensure we only release if it's the same pointer
+            if getattr(p, "active_pointer", 0) != pointer_id:
+                return False
+
+            dx = pos[0] - p.touch_down_pos[0]
+            dy = pos[1] - p.touch_down_pos[1]
             moved = (dx * dx + dy * dy) ** 0.5 > self.long_press_move_tol
             held_ms = pygame.time.get_ticks() - p.last_touch_down_t
             if (not moved) and held_ms >= self.long_press_ms:
@@ -487,11 +501,15 @@ class SynthesizerView:
             self.active_idx = None
             return True
 
-        elif ev.type == pygame.MOUSEMOTION:
+        elif ev.type == pygame.MOUSEMOTION or ev.type == pygame.FINGERMOTION:
             if self.active_idx is not None:
                 p = self.partials[self.active_idx]
+                # For motion, check pointer if it's a finger
+                if ev.type == pygame.FINGERMOTION and getattr(p, "active_pointer", 0) != pointer_id:
+                    return False
+                
                 if p.dragging:
-                    p.set_amp_from_y(ev.pos[1])
+                    p.set_amp_from_y(pos[1])
                     self._notify_audio()
                 return True
         return False

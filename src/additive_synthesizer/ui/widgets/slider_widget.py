@@ -1,6 +1,8 @@
 import pygame
 from pygame.sprite import DirtySprite
 
+from ..utils.input import get_event_pos, is_primary_click
+
 class SliderWidget(DirtySprite):
     def __init__(self, rect, initial_value, action, bg_color, fill_color, release_action=None):
         super().__init__()
@@ -11,6 +13,9 @@ class SliderWidget(DirtySprite):
         self.release_action = release_action
         self.bg_color = bg_color
         self.fill_color = fill_color
+        
+        # Track which pointer is dragging the slider
+        self.active_pointer = None
         self.dragging = False
         self._rebuild_image()
 
@@ -42,23 +47,35 @@ class SliderWidget(DirtySprite):
         self.dirty = 1
 
     def handle_event(self, ev):
-        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button in (1, 0):
-            # Extend hitbox slightly for the knob
-            hitbox = self.rect.inflate(self.rect.height + 8, self.rect.height + 8)
-            if hitbox.collidepoint(ev.pos):
-                self.dragging = True
-                self._update_value(ev.pos[0])
-                return True
-        elif ev.type == pygame.MOUSEBUTTONUP and ev.button in (1, 0):
-            if self.dragging:
+        pos = get_event_pos(ev)
+        if pos is None:
+            return False
+            
+        pointer_id = getattr(ev, "finger_id", 0) if ev.type in (pygame.FINGERDOWN, pygame.FINGERUP, pygame.FINGERMOTION) else 0
+
+        if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
+            if is_primary_click(ev):
+                # Extend hitbox slightly for the knob
+                hitbox = self.rect.inflate(self.rect.height + 8, self.rect.height + 8)
+                if hitbox.collidepoint(pos):
+                    self.dragging = True
+                    self.active_pointer = pointer_id
+                    self._update_value(pos[0])
+                    return True
+        elif ev.type in (pygame.MOUSEBUTTONUP, pygame.FINGERUP):
+            if self.dragging and self.active_pointer == pointer_id:
                 self.dragging = False
+                self.active_pointer = None
                 if self.release_action:
                     self.release_action()
                 return True
-        elif ev.type == pygame.MOUSEMOTION:
+        elif ev.type in (pygame.MOUSEMOTION, pygame.FINGERMOTION):
             if self.dragging:
-                self._update_value(ev.pos[0])
-                return True
+                # For motion, we only update if it's the same pointer or if it's a finger motion
+                # (since mouse motion doesn't have finger_id)
+                if ev.type == pygame.MOUSEMOTION or self.active_pointer == pointer_id:
+                    self._update_value(pos[0])
+                    return True
         return False
 
     def _update_value(self, mouse_x):

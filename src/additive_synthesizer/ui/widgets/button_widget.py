@@ -1,6 +1,8 @@
 import pygame
 from pygame.sprite import DirtySprite
 
+from ..utils.input import get_event_pos, is_primary_click
+
 class ButtonWidget(DirtySprite):
     def __init__(self, rect, label, action, font, panel_accent, white, long_press_action=None):
         super().__init__()
@@ -12,6 +14,9 @@ class ButtonWidget(DirtySprite):
         self.font = font
         self.panel_accent = panel_accent
         self.white = white
+        
+        # Track which pointer (mouse or finger) is pressing the button
+        self.active_pointer = None
         
         self.is_pressed = False
         self.press_time = 0
@@ -32,19 +37,28 @@ class ButtonWidget(DirtySprite):
         self.dirty = 1
 
     def handle_event(self, ev):
-        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button in (1, 0):
-            if self.rect.collidepoint(ev.pos):
-                self.is_pressed = True
-                self.press_time = pygame.time.get_ticks()
-                self.long_press_triggered = False
-                self._rebuild_image()
-                return True
+        pos = get_event_pos(ev)
+        if pos is None:
+            return False
+
+        pointer_id = getattr(ev, "finger_id", 0) if ev.type in (pygame.FINGERDOWN, pygame.FINGERUP) else 0
+
+        if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
+            if is_primary_click(ev):
+                if self.rect.collidepoint(pos):
+                    self.active_pointer = pointer_id
+                    self.is_pressed = True
+                    self.press_time = pygame.time.get_ticks()
+                    self.long_press_triggered = False
+                    self._rebuild_image()
+                    return True
         
-        elif ev.type == pygame.MOUSEBUTTONUP and ev.button in (1, 0):
-            if self.is_pressed:
+        elif ev.type in (pygame.MOUSEBUTTONUP, pygame.FINGERUP):
+            if self.is_pressed and self.active_pointer == pointer_id:
                 self.is_pressed = False
+                self.active_pointer = None
                 self._rebuild_image()
-                if self.rect.collidepoint(ev.pos) and not self.long_press_triggered:
+                if self.rect.collidepoint(pos) and not self.long_press_triggered:
                     self.action()
                 return True
                 
