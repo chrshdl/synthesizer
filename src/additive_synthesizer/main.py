@@ -46,7 +46,7 @@ def run(conf: Config) -> None:
         allowedchanges=0,
     )
     pygame.init()
-    pygame.mouse.set_visible(True)
+    pygame.mouse.set_visible(False)
 
     use_hardware_renderer = is_raspberry_pi_4()
     gpu_renderer = None
