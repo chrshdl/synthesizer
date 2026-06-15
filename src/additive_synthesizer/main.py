@@ -1,8 +1,8 @@
-# import os
+import os
 import signal
 import sys
 
-# os.environ["SDL_AUDIODRIVER"] = "alsa"
+os.environ["SDL_AUDIODRIVER"] = "alsa"
 import pygame
 
 from .config import Config, ConfigManager
