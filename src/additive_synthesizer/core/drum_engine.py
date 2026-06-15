@@ -5,6 +5,16 @@ import pygame
 
 class DrumEngine:
     def __init__(self):
+        self.reload_sounds()
+
+        # Temporary QWERTY mapping for testing
+        self.drum_mapping = {
+            pygame.K_1: self.play_kick,
+            pygame.K_2: self.play_snare,
+            pygame.K_3: self.play_hat,
+        }
+
+    def reload_sounds(self):
         # channels specifically for drums
         self.kick_channel = pygame.mixer.Channel(13)
         self.snare_channel = pygame.mixer.Channel(14)
@@ -17,13 +27,6 @@ class DrumEngine:
         self.kick = pygame.mixer.Sound(str(assets_dir / "kick.wav"))
         self.snare = pygame.mixer.Sound(str(assets_dir / "snare.wav"))
         self.hat = pygame.mixer.Sound(str(assets_dir / "hihat.wav"))
-
-        # Temporary QWERTY mapping for testing
-        self.drum_mapping = {
-            pygame.K_1: self.play_kick,
-            pygame.K_2: self.play_snare,
-            pygame.K_3: self.play_hat,
-        }
 
     def play_kick(self):
         self.kick_channel.play(self.kick)

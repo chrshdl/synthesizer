@@ -1,7 +1,6 @@
 import subprocess
 import threading
 
-import pygame
 from pygame.sprite import LayeredDirty
 
 from ...config import ConfigManager
@@ -11,8 +10,10 @@ from ..widgets.button_widget import ButtonWidget
 
 
 class SettingsView:
-    def __init__(self, on_back):
+    def __init__(self, on_back, audio_engine, drum_engine):
         self.on_back = on_back
+        self.audio_engine = audio_engine
+        self.drum_engine = drum_engine
         self.logger = Logger(__class__.__name__).get()
         self.width = ConfigManager.get_config().width
         self.height = ConfigManager.get_config().height
@@ -60,7 +61,7 @@ class SettingsView:
         if self.is_scanning:
             return
         self.is_scanning = True
-        self.status_message = "Scanning for 5 seconds..."
+        self.status_message = "Scanning for 15 seconds..."
         self.scan_thread = threading.Thread(target=self._scan_thread_func, daemon=True)
         self.scan_thread.start()
 
@@ -69,7 +70,9 @@ class SettingsView:
             # ensure powered on
             subprocess.run(["bluetoothctl", "power", "on"], capture_output=True)
             # scan
-            subprocess.run(["bluetoothctl", "--timeout", "5", "scan", "on"], capture_output=True)
+            subprocess.run(
+                ["bluetoothctl", "--timeout", "15", "scan", "on"], capture_output=True
+            )
         except Exception as e:
             self.logger.error(f"Scan error: {e}")
 
@@ -86,7 +89,12 @@ class SettingsView:
                 if line.startswith("Device "):
                     parts = line.split(" ", 2)
                     if len(parts) >= 3:
-                        new_devices.append({"mac": parts[1], "name": parts[2]})
+                        mac = parts[1]
+                        name = parts[2].strip()
+                        mac_clean = mac.replace(':', '').upper()
+                        name_clean = name.replace(':', '').replace('-', '').upper()
+                        if name and name_clean != mac_clean:
+                            new_devices.append({"mac": mac, "name": name})
             self.devices = new_devices
         except Exception as e:
             self.logger.error(f"Get devices error: {e}")
@@ -95,16 +103,26 @@ class SettingsView:
 
     def connect_device(self, mac):
         self.status_message = f"Connecting to {mac}..."
-        threading.Thread(target=self._connect_thread_func, args=(mac,), daemon=True).start()
+        threading.Thread(
+            target=self._connect_thread_func, args=(mac,), daemon=True
+        ).start()
 
     def _connect_thread_func(self, mac):
         try:
             # Pair, trust, connect
             subprocess.run(["bluetoothctl", "pair", mac], capture_output=True)
             subprocess.run(["bluetoothctl", "trust", mac], capture_output=True)
-            res = subprocess.run(["bluetoothctl", "connect", mac], capture_output=True, text=True)
+            res = subprocess.run(
+                ["bluetoothctl", "connect", mac], capture_output=True, text=True
+            )
             if "Connection successful" in res.stdout:
                 self.status_message = f"Connected to {mac}"
+                self.logger.info("Switching audio to Bluetooth...")
+                try:
+                    self.audio_engine.switch_to_bluetooth()
+                    self.drum_engine.reload_sounds()
+                except Exception as e:
+                    self.logger.error(f"Failed to reload audio engines: {e}")
             else:
                 self.status_message = f"Failed to connect {mac}"
         except Exception as e:
@@ -115,22 +133,23 @@ class SettingsView:
             self.ui_layer.remove(b)
         self.device_buttons.clear()
 
-        start_y = 100
-        btn_w, btn_h = 600, 50
+        start_y = 120
+        btn_w, btn_h = 800, 80
+        start_x = (self.width - btn_w) // 2
         for i, dev in enumerate(self.devices):
-            y = start_y + i * (btn_h + 10)
-            if y > self.height - btn_h:
+            y = start_y + i * (btn_h + 16)
+            if y > self.height - btn_h - 20:
                 break
 
             # capture dev['mac'] in closure
             def make_action(mac):
                 return lambda: self.connect_device(mac)
 
-            label = f"{dev['name'][:30]} ({dev['mac']})"
+            label = f"{dev['name'][:40]} ({dev['mac']})"
             btn = ButtonWidget(
-                (16, y, btn_w, btn_h),
+                (start_x, y, btn_w, btn_h),
                 label,
-                make_action(dev['mac']),
+                make_action(dev["mac"]),
                 self.font_med,
                 self.panel_accent,
                 self.white,
@@ -165,6 +184,6 @@ class SettingsView:
 
     def handle_event(self, ev):
         for b in self.ui_layer.sprites():
-            if hasattr(b, 'handle_event') and b.handle_event(ev):
+            if hasattr(b, "handle_event") and b.handle_event(ev):
                 return True
         return False

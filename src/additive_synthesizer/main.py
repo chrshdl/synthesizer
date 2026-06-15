@@ -77,6 +77,7 @@ def run(conf: Config) -> None:
         initial_state = SynthesizerState(
             state_manager=state_manager,
             audio_engine=audio_engine,
+            drum_engine=drum_engine,
             n_partials=n_partials,
         )
 

@@ -1,52 +1,62 @@
+import os
 import numpy as np
 import pygame
 
 
 class AudioEngine:
     def __init__(self, num_partials=8):
-        # we need at least 13 channels for our 13 keys (C4 to C5)
+        self.num_partials = num_partials
+        self.length = 44100  # 1 second buffer for perfect loops
+        
+        self.key_freqs = [
+            262, 277, 294, 311, 330, 349, 370, 392, 415, 440, 466, 494, 523,
+        ]
+        
+        self.master_volume = 0.5
+        self.current_amps = [1.0] + [0.0] * (self.num_partials - 1)
+        self.active_notes = set()
+
+        self._init_mixer(use_bluetooth=False)
+
+    def _init_mixer(self, use_bluetooth=False):
+        pygame.mixer.quit()
+        
+        if use_bluetooth:
+            os.environ["AUDIODEV"] = "bluealsa:DEV=00:00:00:00:00:00,PROFILE=a2dp"
+        else:
+            if "AUDIODEV" in os.environ:
+                del os.environ["AUDIODEV"]
+        
+        try:
+            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=256, allowedchanges=0)
+            self.bt_active = use_bluetooth
+        except pygame.error:
+            # Fallback to default
+            if "AUDIODEV" in os.environ:
+                del os.environ["AUDIODEV"]
+            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=256, allowedchanges=0)
+            self.bt_active = False
+            
         pygame.mixer.set_num_channels(16)
         actual_freq, actual_format, actual_channels = pygame.mixer.get_init()
-
-        self.num_partials = num_partials
         self.sr = actual_freq
-        self.length = actual_freq  # 1 second buffer for perfect loops
+        self.length = actual_freq
+        self.actual_channels = actual_channels
+        self.buffer_shape = (self.length, 2) if actual_channels == 2 else (self.length,)
+        
+        self._precompute_sounds()
 
-        self.key_freqs = [
-            262,
-            277,
-            294,
-            311,
-            330,
-            349,
-            370,
-            392,
-            415,
-            440,
-            466,
-            494,
-            523,
-        ]
-
+    def _precompute_sounds(self):
         t = np.linspace(0, 1.0, self.length, endpoint=False)
-
         self.freq_partials = {}
         self.sounds = {}
         self.sound_arrays = {}
-
-        # hardware voice architecture
         self.freq_channels = {}
-        self.active_notes = set()
 
-        self.buffer_shape = (self.length, 2) if actual_channels == 2 else (self.length,)
-        self.actual_channels = actual_channels
-
-        # precompute the thickened wavetables for all keys
         for i, f in enumerate(self.key_freqs):
             partials = []
             for p_idx in range(self.num_partials):
                 base_f = f * (p_idx + 1)
-
                 detune_hz = 3 + p_idx
                 wave_center = np.sin(2 * np.pi * base_f * t)
                 wave_sharp = np.sin(2 * np.pi * (base_f + detune_hz) * t) * 0.4
@@ -55,17 +65,21 @@ class AudioEngine:
                 partials.append(thick_wave)
 
             self.freq_partials[f] = np.array(partials, dtype=np.float32)
-
             sound = pygame.mixer.Sound(np.zeros(self.buffer_shape, dtype=np.int16))
             self.sounds[f] = sound
             self.sound_arrays[f] = pygame.sndarray.samples(sound)
-
-            # permanently assign a dedicated pygame channel (0 - 12)
             self.freq_channels[f] = pygame.mixer.Channel(i)
 
-        self.master_volume = 0.5
-        self.current_amps = [1.0] + [0.0] * (self.num_partials - 1)
         self.update_amplitudes(self.current_amps)
+        
+        # Restore active notes
+        for f in self.active_notes:
+            channel = self.freq_channels[f]
+            channel.set_volume(1.0)
+            channel.play(self.sounds[f], loops=-1)
+
+    def switch_to_bluetooth(self):
+        self._init_mixer(use_bluetooth=True)
 
     def set_master_volume(self, vol: float):
         self.master_volume = vol
