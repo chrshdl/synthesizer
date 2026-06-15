@@ -128,14 +128,20 @@ class SynthesizerView:
                 self.audio_engine.note_on(f)
 
     def _init_ui_elements(self):
-        btn_w, btn_h, pad = 140, 60, 12
+        btn_w, btn_h, pad = 120, 60, 12
 
         btn_y = (self.top_bar_h - btn_h) // 2
+        
+        self.on_settings_action = None
+        
+        def _open_settings():
+            if self.on_settings_action:
+                self.on_settings_action()
 
         self.buttons = [
             ButtonWidget(
                 (16, btn_y, btn_w, btn_h),
-                "MUTE ALL",
+                "MUTE",
                 self.mute_all,
                 self.font_med,
                 self.panel_accent,
@@ -178,6 +184,14 @@ class SynthesizerView:
                 (16 + 5 * (btn_w + pad), btn_y, btn_w, btn_h),
                 "KEYS",
                 self.toggle_keys,
+                self.font_med,
+                self.panel_accent,
+                self.white,
+            ),
+            ButtonWidget(
+                (16 + 6 * (btn_w + pad), btn_y, btn_w, btn_h),
+                "BT/SET",
+                _open_settings,
                 self.font_med,
                 self.panel_accent,
                 self.white,
