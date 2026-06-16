@@ -6,12 +6,19 @@ from ..utils.input import get_event_pos, is_primary_click
 
 class SliderWidget(DirtySprite):
     def __init__(
-        self, rect, initial_value, action, bg_color, fill_color, release_action=None
+        self,
+        rect,
+        initial_value,
+        action,
+        bg_color,
+        fill_color,
+        release_action=None,
+        knob_radius=None,
     ):
         super().__init__()
-        self.rect = pygame.Rect(rect)
 
-        self.image = pygame.Surface(self.rect.size, pygame.SRCALPHA)
+        # store the requested rect as the "logical" boundary
+        logical_rect = pygame.Rect(rect)
 
         self.value = initial_value
         self.action = action
@@ -22,14 +29,27 @@ class SliderWidget(DirtySprite):
         self.active_pointer = None
         self.dragging = False
 
-        # pre-calculate geometric bounds
-        self.knob_radius = self.rect.height // 2
+        if knob_radius is not None:
+            self.knob_radius = knob_radius
+        else:
+            self.knob_radius = logical_rect.height // 2
 
-        # the track is thinner than the total widget height to create the "large knob" effect
-        self.track_h = max(4, self.rect.height - 20)
+        # base track thickness on the requested height
+        self.track_h = max(4, logical_rect.height - 20)
         self.track_r = self.track_h // 2
 
-        # the draggable width is constrained so the knob never leaves the left/right surface bounds
+        # expand the actual Sprite rect if the knob is taller than the requested height
+        self.rect = pygame.Rect(logical_rect)
+        required_height = max(logical_rect.height, self.knob_radius * 2)
+
+        if required_height > logical_rect.height:
+            self.rect.height = required_height
+            # Re-center to keep the track exactly where you placed it in your UI layout
+            self.rect.centery = logical_rect.centery
+
+        # create the surface using the newly expanded bounds
+        self.image = pygame.Surface(self.rect.size, pygame.SRCALPHA)
+
         self.track_w = self.rect.width - (self.knob_radius * 2)
 
         self._rebuild_image()
@@ -65,7 +85,10 @@ class SliderWidget(DirtySprite):
 
         knob_x = self.knob_radius + int(self.value * self.track_w)
         pygame.draw.circle(
-            self.image, (255, 255, 255), (knob_x, local_rect.centery), self.knob_radius
+            self.image,
+            (255, 255, 255),
+            (knob_x, local_rect.centery),
+            self.knob_radius,
         )
         self.dirty = 1
 
@@ -82,8 +105,9 @@ class SliderWidget(DirtySprite):
 
         if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
             if is_primary_click(ev):
-                # extend hitbox slightly for the knob
-                hitbox = self.rect.inflate(self.rect.height + 8, self.rect.height + 8)
+                # the rect is already expanded to fit the knob,
+                # so we just add a flat buffer
+                hitbox = self.rect.inflate(16, 16)
                 if hitbox.collidepoint(pos):
                     self.dragging = True
                     self.active_pointer = pointer_id

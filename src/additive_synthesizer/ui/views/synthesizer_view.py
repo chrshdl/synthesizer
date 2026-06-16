@@ -53,6 +53,7 @@ class SynthesizerView:
         ]
 
         self.font_med = load_font(size=22, family=FontFamily.D_DIN_EXP_BOLD)
+        self.font_icons = load_font(size=36, family=FontFamily.MATERIAL_SYMBOLS)
 
         base_min_r = 32
         base_max_r = 56
@@ -131,9 +132,9 @@ class SynthesizerView:
         btn_w, btn_h, pad = 120, 60, 12
 
         btn_y = (self.top_bar_h - btn_h) // 2
-        
+
         self.on_settings_action = None
-        
+
         def _open_settings():
             if self.on_settings_action:
                 self.on_settings_action()
@@ -190,16 +191,16 @@ class SynthesizerView:
             ),
             ButtonWidget(
                 (16 + 6 * (btn_w + pad), btn_y, btn_w, btn_h),
-                "BT/SET",
+                "\ue1a7",
                 _open_settings,
-                self.font_med,
+                self.font_icons,
                 self.panel_accent,
                 self.white,
             ),
         ]
 
         slider_w = 200
-        slider_h = 36
+        slider_h = 28
         slider_x = self.width - slider_w - 32
         slider_y = (self.top_bar_h - slider_h) // 2
         self.vol_slider = SliderWidget(
@@ -209,6 +210,7 @@ class SynthesizerView:
             bg_color=self.bg_color,
             fill_color=(75, 192, 192),
             release_action=self._save_settings,
+            knob_radius=20,
         )
 
         self.ui_layer.add(*self.buttons)
@@ -396,7 +398,7 @@ class SynthesizerView:
                     surface.blit(scope_surf, (0, 0))
 
         pygame.draw.rect(surface, self.panel_color, (0, 0, self.width, self.top_bar_h))
-        vol_label = self.font_med.render("Volume", True, self.white)
+        vol_label = self.font_icons.render("\ue050", True, self.white)
         surface.blit(
             vol_label,
             (

@@ -62,6 +62,10 @@ class SettingsView:
             return
         self.is_scanning = True
         self.status_message = "Scanning for 15 seconds..."
+        
+        self.devices.clear()
+        self._rebuild_device_buttons()
+        
         self.scan_thread = threading.Thread(target=self._scan_thread_func, daemon=True)
         self.scan_thread.start()
 
