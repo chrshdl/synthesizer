@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import pygame
 
@@ -21,19 +20,10 @@ class AudioEngine:
     def _init_mixer(self, use_bluetooth=False):
         pygame.mixer.quit()
         
-        if use_bluetooth:
-            os.environ["AUDIODEV"] = "bluealsa:DEV=00:00:00:00:00:00,PROFILE=a2dp"
-        else:
-            if "AUDIODEV" in os.environ:
-                del os.environ["AUDIODEV"]
-        
         try:
             pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=256, allowedchanges=0)
             self.bt_active = use_bluetooth
         except pygame.error:
-            # Fallback to default
-            if "AUDIODEV" in os.environ:
-                del os.environ["AUDIODEV"]
             pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=256, allowedchanges=0)
             self.bt_active = False
             
