@@ -86,8 +86,23 @@ class SettingsView:
 
     def refresh_devices_sync(self):
         try:
-            res = subprocess.run(["bluetoothctl", "devices"], capture_output=True, text=True)
-            lines = res.stdout.strip().split('\n')
+            # Get all devices
+            res = subprocess.run(
+                ["bluetoothctl", "devices"], capture_output=True, text=True
+            )
+            lines = res.stdout.strip().split("\n")
+
+            # Get connected devices
+            res_conn = subprocess.run(
+                ["bluetoothctl", "devices", "Connected"], capture_output=True, text=True
+            )
+            connected_macs = []
+            for line in res_conn.stdout.strip().split("\n"):
+                if line.startswith("Device "):
+                    parts = line.split(" ")
+                    if len(parts) >= 2:
+                        connected_macs.append(parts[1])
+
             new_devices = []
             for line in lines:
                 if line.startswith("Device "):
@@ -95,10 +110,16 @@ class SettingsView:
                     if len(parts) >= 3:
                         mac = parts[1]
                         name = parts[2].strip()
-                        mac_clean = mac.replace(':', '').upper()
-                        name_clean = name.replace(':', '').replace('-', '').upper()
+                        mac_clean = mac.replace(":", "").upper()
+                        name_clean = name.replace(":", "").replace("-", "").upper()
                         if name and name_clean != mac_clean:
-                            new_devices.append({"mac": mac, "name": name})
+                            new_devices.append(
+                                {
+                                    "mac": mac,
+                                    "name": name,
+                                    "connected": mac in connected_macs,
+                                }
+                            )
             self.devices = new_devices
         except Exception as e:
             self.logger.error(f"Get devices error: {e}")
@@ -131,6 +152,21 @@ class SettingsView:
                 self.status_message = f"Failed to connect {mac}"
         except Exception as e:
             self.status_message = f"Error: {e}"
+        self.refresh_devices_sync()
+
+    def disconnect_device(self, mac):
+        self.status_message = f"Disconnecting {mac}..."
+        threading.Thread(
+            target=self._disconnect_thread_func, args=(mac,), daemon=True
+        ).start()
+
+    def _disconnect_thread_func(self, mac):
+        try:
+            subprocess.run(["bluetoothctl", "disconnect", mac], capture_output=True)
+            self.status_message = f"Disconnected {mac}"
+        except Exception as e:
+            self.status_message = f"Error: {e}"
+        self.refresh_devices_sync()
 
     def _rebuild_device_buttons(self):
         for b in self.device_buttons:
@@ -138,28 +174,67 @@ class SettingsView:
         self.device_buttons.clear()
 
         start_y = 120
-        btn_w, btn_h = 800, 80
-        start_x = (self.width - btn_w) // 2
+        btn_h = 80
+        total_w = 800
+        start_x = (self.width - total_w) // 2
         for i, dev in enumerate(self.devices):
             y = start_y + i * (btn_h + 16)
             if y > self.height - btn_h - 20:
                 break
 
-            # capture dev['mac'] in closure
-            def make_action(mac):
-                return lambda: self.connect_device(mac)
+            is_connected = dev.get("connected", False)
 
-            label = f"{dev['name'][:40]} ({dev['mac']})"
-            btn = ButtonWidget(
-                (start_x, y, btn_w, btn_h),
-                label,
-                make_action(dev["mac"]),
-                self.font_med,
-                self.panel_accent,
-                self.white,
-            )
-            self.device_buttons.append(btn)
-            self.ui_layer.add(btn)
+            if is_connected:
+                dev_btn_w = 600
+                disc_btn_w = 180
+                pad = 20
+
+                # Device Button (now green/highlighted)
+                def make_conn_action(mac):
+                    return lambda: self.connect_device(mac)
+
+                label = f"{dev['name'][:30]} (CONNECTED)"
+                btn = ButtonWidget(
+                    (start_x, y, dev_btn_w, btn_h),
+                    label,
+                    make_conn_action(dev["mac"]),
+                    self.font_med,
+                    (30, 80, 50),
+                    self.white,
+                )
+                self.device_buttons.append(btn)
+                self.ui_layer.add(btn)
+
+                # Disconnect Button
+                def make_disc_action(mac):
+                    return lambda: self.disconnect_device(mac)
+
+                btn_disc = ButtonWidget(
+                    (start_x + dev_btn_w + pad, y, disc_btn_w, btn_h),
+                    "DISCONNECT",
+                    make_disc_action(dev["mac"]),
+                    self.font_med,
+                    (120, 40, 40),
+                    self.white,
+                )
+                self.device_buttons.append(btn_disc)
+                self.ui_layer.add(btn_disc)
+            else:
+                # Normal Button
+                def make_action(mac):
+                    return lambda: self.connect_device(mac)
+
+                label = f"{dev['name'][:40]} ({dev['mac']})"
+                btn = ButtonWidget(
+                    (start_x, y, total_w, btn_h),
+                    label,
+                    make_action(dev["mac"]),
+                    self.font_med,
+                    self.panel_accent,
+                    self.white,
+                )
+                self.device_buttons.append(btn)
+                self.ui_layer.add(btn)
 
     def draw(self, surface, background):
         surface.fill(self.bg_color)

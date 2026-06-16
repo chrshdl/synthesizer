@@ -1,6 +1,5 @@
 import random
 
-import numpy as np
 import pygame
 from pygame.sprite import LayeredDirty
 
@@ -362,40 +361,6 @@ class SynthesizerView:
 
     def draw(self, surface, background):
         surface.fill(self.bg_color)
-
-        if self.show_waveform:
-            wf = self.audio_engine.sound_arrays.get(self.key_freqs[0])
-            if wf is not None and len(wf) > 0:
-                samples_to_show = 200
-                offset = int(-self.phase_offset) % 200
-                segment = (
-                    wf[offset : offset + samples_to_show, 0]
-                    if wf.ndim == 2
-                    else wf[offset : offset + samples_to_show]
-                )
-                max_val = np.max(np.abs(segment))
-                display_wf = segment / max_val if max_val > 1e-5 else segment
-
-                points = []
-                available_bottom = (
-                    self.height - 310 if self.show_keys else self.height - 50
-                )
-                usable_height = available_bottom - self.top_bar_h
-                center_y = self.top_bar_h + usable_height // 2
-                scale_y = usable_height * 0.4
-                step = samples_to_show / self.width
-
-                for x in range(self.width):
-                    idx = int(x * step)
-                    y = center_y - int(display_wf[idx] * scale_y)
-                    points.append((x, y))
-
-                if len(points) >= 2:
-                    scope_surf = pygame.Surface(
-                        (self.width, self.height), pygame.SRCALPHA
-                    )
-                    pygame.draw.lines(scope_surf, (75, 192, 192, 128), False, points, 4)
-                    surface.blit(scope_surf, (0, 0))
 
         pygame.draw.rect(surface, self.panel_color, (0, 0, self.width, self.top_bar_h))
         vol_label = self.font_icons.render("\ue050", True, self.white)
