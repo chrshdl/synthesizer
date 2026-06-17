@@ -1,8 +1,9 @@
-# import os
+import os
 import signal
+import subprocess
 import sys
 
-# os.environ["SDL_AUDIODRIVER"] = "alsa"
+os.environ["SDL_AUDIODRIVER"] = "alsa"
 import pygame
 
 from .config import Config, ConfigManager
@@ -36,16 +37,27 @@ def run(conf: Config) -> None:
     signal.signal(signal.SIGINT, handle_exit)
     signal.signal(signal.SIGTERM, handle_exit)
 
-    # pre-init mixer with a very low buffer size (128 or 256) to ensure low latency
-    pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=256)
+    # pre-init mixer with 512 buffer so PipeWire uses a large quantum for Bluetooth A2DP
+    pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=512)
     pygame.mixer.init(
         frequency=44100,
         size=-16,
         channels=2,
-        buffer=256,
+        buffer=512,
         allowedchanges=0,
     )
     pygame.init()
+
+    # force WirePlumber volume to 85% after everything is initialized.
+    try:
+        subprocess.run(
+            ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "0.85"], check=False
+        )
+    except Exception as e:
+        logger.warning(f"Failed to set volume: str{e}")
+
+    # Initialize font module
+    pygame.font.init()
     pygame.mouse.set_visible(False)
 
     use_hardware_renderer = is_raspberry_pi_4()

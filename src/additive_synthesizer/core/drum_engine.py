@@ -15,11 +15,6 @@ class DrumEngine:
         }
 
     def reload_sounds(self):
-        # channels specifically for drums
-        self.kick_channel = pygame.mixer.Channel(13)
-        self.snare_channel = pygame.mixer.Channel(14)
-        self.hat_channel = pygame.mixer.Channel(15)
-
         base_dir = Path(__file__).resolve().parent.parent
         assets_dir = base_dir / "assets"
 
@@ -29,13 +24,13 @@ class DrumEngine:
         self.hat = pygame.mixer.Sound(str(assets_dir / "hihat.wav"))
 
     def play_kick(self):
-        self.kick_channel.play(self.kick)
+        self.kick.play()
 
     def play_snare(self):
-        self.snare_channel.play(self.snare)
+        self.snare.play()
 
     def play_hat(self):
-        self.hat_channel.play(self.hat)
+        self.hat.play()
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN and event.key in self.drum_mapping:

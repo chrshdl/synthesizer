@@ -216,13 +216,7 @@ class SynthesizerView:
         self.ui_layer.add(self.vol_slider)
 
     def _init_widgets(self):
-        self.keyboard = KeyboardWidget(
-            (self.margin_x, self.height - 300, self.width - 2 * self.margin_x, 280),
-            self.on_note_on,
-            self.on_note_off,
-        )
-        self.keyboard.visible = 1 if self.show_keys else 0
-        self.widget_layer.add(self.keyboard)
+        self._layout_keyboard()
 
     def _load_settings(self):
         config = ConfigManager.get_config()
@@ -235,20 +229,23 @@ class SynthesizerView:
             for i in range(self.n_partials)
         ]
 
+        # Salsa Brass: Piercing, bright, and cutting. Strong fundamental,
+        # scooped 2nd harmonic to remove mud, and massively boosted 4th/5th harmonics 
+        # to simulate the bright 'blare' of a Latin trumpet section.
         brass = [
             (1.0, True),
-            (0.8, True),
-            (0.6, True),
-            (0.5, True),
             (0.4, True),
-            (0.3, True),
+            (0.8, True),
+            (1.0, True),
+            (0.9, True),
+            (0.6, True),
+            (0.4, True),
             (0.2, True),
-            (0.1, True),
         ]
 
         needs_save = False
         if not config.presets:
-            config.presets = {"1": sawtooth, "2": square, "3": None}
+            config.presets = {"1": sawtooth, "2": square, "3": brass}
             needs_save = True
         else:
             if (
@@ -263,9 +260,8 @@ class SynthesizerView:
             ):
                 config.presets["2"] = square
                 needs_save = True
-            if "3" not in config.presets:
-                config.presets["3"] = brass
-                needs_save = True
+            config.presets["3"] = brass
+            needs_save = True
 
         if needs_save:
             config.write_to_file(ConfigManager.path)
@@ -304,19 +300,39 @@ class SynthesizerView:
         self.show_waveform = not self.show_waveform
         self._save_settings()
 
-    def toggle_keys(self):
-        self.show_keys = not self.show_keys
-        self.keyboard.visible = 1 if self.show_keys else 0
-        self._save_settings()
+    def _layout_keyboard(self):
+        if hasattr(self, 'keyboard') and self.keyboard in self.widget_layer:
+            self.widget_layer.remove(self.keyboard)
 
-        if self.show_keys:
-            for f in self.default_drone_freqs:
-                self.audio_engine.note_off(f)
-        else:
+        if self.show_keys == 0:
+            if hasattr(self, 'keyboard'):
+                self.keyboard.visible = 0
+                self.widget_layer.add(self.keyboard)
             for f in self.key_freqs:
                 self.audio_engine.note_off(f)
             for f in self.default_drone_freqs:
                 self.audio_engine.note_on(f)
+        else:
+            if self.show_keys == 1:
+                keyboard_h = 280
+            else:
+                keyboard_h = self.height - self.top_bar_h - 20
+                
+            self.keyboard = KeyboardWidget(
+                (self.margin_x, self.height - keyboard_h - 20, self.width - 2 * self.margin_x, keyboard_h),
+                self.on_note_on,
+                self.on_note_off,
+            )
+            self.keyboard.visible = 1
+            self.widget_layer.add(self.keyboard)
+            
+            for f in self.default_drone_freqs:
+                self.audio_engine.note_off(f)
+
+    def toggle_keys(self):
+        self.show_keys = (int(self.show_keys) + 1) % 3
+        self._layout_keyboard()
+        self._save_settings()
 
     def on_note_on(self, idx):
         if not self.show_keys:
@@ -372,15 +388,16 @@ class SynthesizerView:
             ),
         )
 
-        for p in self.partials:
-            cx, cy = p.bubble_center()
-            r = p.bubble_radius()
-            color = p.color if p.active else self.inactive
-            pygame.draw.circle(surface, (0, 0, 0), (cx + 2, cy + 4), r + 4)
-            pygame.draw.circle(surface, color, (cx, cy), r)
-            pygame.draw.circle(
-                surface, (255, 255, 255), (cx - r // 3, cy - r // 3), max(3, r // 6)
-            )
+        if self.show_keys != 2:
+            for p in self.partials:
+                cx, cy = p.bubble_center()
+                r = p.bubble_radius()
+                color = p.color if p.active else self.inactive
+                pygame.draw.circle(surface, (0, 0, 0), (cx + 2, cy + 4), r + 4)
+                pygame.draw.circle(surface, color, (cx, cy), r)
+                pygame.draw.circle(
+                    surface, (255, 255, 255), (cx - r // 3, cy - r // 3), max(3, r // 6)
+                )
 
         for sprite in self.widget_layer.sprites():
             sprite.dirty = 1
@@ -438,9 +455,9 @@ class SynthesizerView:
 
         pointer_id = getattr(ev, "finger_id", 0) if is_touch_event(ev) else 0
 
-        if (
-            ev.type == pygame.MOUSEBUTTONDOWN and is_primary_click(ev)
-        ) or ev.type == pygame.FINGERDOWN:
+        if self.show_keys != 2 and (
+            (ev.type == pygame.MOUSEBUTTONDOWN and is_primary_click(ev)) or ev.type == pygame.FINGERDOWN
+        ):
             px, py = pos
             y0 = self.height - self.bottom_gutter + 10
             for i, p in enumerate(self.partials):

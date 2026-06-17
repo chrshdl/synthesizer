@@ -18,7 +18,7 @@ class Config:
     presets: dict = field(default_factory=dict)
     master_volume: float = 0.5
     show_waveform: bool = False
-    show_keys: bool = False
+    show_keys: int = 0
 
     @classmethod
     def parse_config(cls, path: Path) -> "Config":
