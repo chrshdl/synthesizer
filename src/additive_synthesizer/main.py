@@ -101,8 +101,8 @@ def run(conf: Config) -> None:
         clock = pygame.time.Clock()
 
         # --- QWERTY Polyphony Mapping ---
-        # A S D F G H J K L ; ' = C4 to C5 white keys
-        # W E T Y U O P = Black keys
+        # A S D F G H J K L = C4 to C5 white keys
+        # W E T Y U = Black keys
         qwerty_mapping = {
             pygame.K_a: 0,
             pygame.K_w: 1,

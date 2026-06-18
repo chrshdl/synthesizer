@@ -10,18 +10,21 @@ from ...ui.utils.font import FontFamily, load_font
 from ..utils.input import get_event_pos, is_primary_click, is_touch_event
 from ..widgets.button_widget import ButtonWidget
 from ..widgets.keyboard_widget import KeyboardWidget
+from ..widgets.drum_kit_widget import DrumKitWidget
 from ..widgets.slider_widget import SliderWidget
 
 
 class SynthesizerView:
-    def __init__(self, audio_engine, n_partials=8):
+    def __init__(self, audio_engine, drum_engine, n_partials=8):
         self.audio_engine = audio_engine
+        self.drum_engine = drum_engine
         self.ui_layer = LayeredDirty()
         self.widget_layer = LayeredDirty()
 
         self.width = ConfigManager.get_config().width
         self.height = ConfigManager.get_config().height
         self.n_partials = n_partials
+        self.drum_kit_locked = True
 
         self.logger = Logger(__class__.__name__).get()
 
@@ -182,7 +185,7 @@ class SynthesizerView:
             ),
             ButtonWidget(
                 (16 + 5 * (btn_w + pad), btn_y, btn_w, btn_h),
-                "KEYS",
+                "MODE",
                 self.toggle_keys,
                 self.font_med,
                 self.panel_accent,
@@ -303,16 +306,19 @@ class SynthesizerView:
     def _layout_keyboard(self):
         if hasattr(self, 'keyboard') and self.keyboard in self.widget_layer:
             self.widget_layer.remove(self.keyboard)
+        if hasattr(self, 'drum_kit') and self.drum_kit in self.widget_layer:
+            self.widget_layer.remove(self.drum_kit)
+        if hasattr(self, 'btn_drum_lock') and self.btn_drum_lock in self.widget_layer:
+            self.widget_layer.remove(self.btn_drum_lock)
 
         if self.show_keys == 0:
             if hasattr(self, 'keyboard'):
                 self.keyboard.visible = 0
-                self.widget_layer.add(self.keyboard)
             for f in self.key_freqs:
                 self.audio_engine.note_off(f)
             for f in self.default_drone_freqs:
                 self.audio_engine.note_on(f)
-        else:
+        elif self.show_keys in (1, 2):
             if self.show_keys == 1:
                 keyboard_h = 280
             else:
@@ -328,11 +334,53 @@ class SynthesizerView:
             
             for f in self.default_drone_freqs:
                 self.audio_engine.note_off(f)
+        elif self.show_keys == 3:
+            # Drum Kit Mode
+            drum_h = self.height - self.top_bar_h - 20
+            self.drum_kit = DrumKitWidget(
+                (self.margin_x, self.top_bar_h + 10, self.width - 2 * self.margin_x, drum_h),
+                self.drum_engine,
+                on_long_press=self.on_drum_long_press
+            )
+            self.drum_kit.is_locked = self.drum_kit_locked
+            self.widget_layer.add(self.drum_kit)
+            
+            # Button shows the action it will perform.
+            # Show current state
+            icon = "\ue897" if self.drum_kit_locked else "\uf656"
+            color = self.panel_accent
+            self.btn_drum_lock = ButtonWidget(
+                (16, self.height - 80 - 16, 80, 80),
+                icon,
+                self.toggle_drum_lock,
+                self.font_icons,
+                color,
+                self.white,
+            )
+            self.widget_layer.add(self.btn_drum_lock)
+            
+            for f in self.key_freqs:
+                self.audio_engine.note_off(f)
+            for f in self.default_drone_freqs:
+                self.audio_engine.note_off(f)
+
+    def toggle_drum_lock(self):
+        self.drum_kit_locked = not self.drum_kit_locked
+        if hasattr(self, 'drum_kit'):
+            self.drum_kit.is_locked = self.drum_kit_locked
+        if hasattr(self, 'btn_drum_lock'):
+            self.btn_drum_lock.label = "\ue897" if self.drum_kit_locked else "\uf656"
+            self.btn_drum_lock.panel_accent = self.panel_accent
+            self.btn_drum_lock._rebuild_image()
 
     def toggle_keys(self):
-        self.show_keys = (int(self.show_keys) + 1) % 3
+        self.show_keys = (int(self.show_keys) + 1) % 4
         self._layout_keyboard()
         self._save_settings()
+
+    def on_drum_long_press(self, drum_name):
+        if hasattr(self, "on_drum_assign_action"):
+            self.on_drum_assign_action(drum_name)
 
     def on_note_on(self, idx):
         if not self.show_keys:
@@ -388,7 +436,7 @@ class SynthesizerView:
             ),
         )
 
-        if self.show_keys != 2:
+        if self.show_keys not in (2, 3):
             for p in self.partials:
                 cx, cy = p.bubble_center()
                 r = p.bubble_radius()
@@ -446,8 +494,13 @@ class SynthesizerView:
         for b in self.buttons:
             if b.handle_event(ev):
                 return True
-        if self.show_keys and self.keyboard.handle_event(ev):
+        if self.show_keys in (1, 2) and hasattr(self, 'keyboard') and self.keyboard.handle_event(ev):
             return True
+        if self.show_keys == 3:
+            if hasattr(self, 'btn_drum_lock') and self.btn_drum_lock.handle_event(ev):
+                return True
+            if hasattr(self, 'drum_kit') and self.drum_kit.handle_event(ev):
+                return True
 
         pos = get_event_pos(ev, self.width, self.height)
         if pos is None:
@@ -455,7 +508,7 @@ class SynthesizerView:
 
         pointer_id = getattr(ev, "finger_id", 0) if is_touch_event(ev) else 0
 
-        if self.show_keys != 2 and (
+        if self.show_keys not in (2, 3) and (
             (ev.type == pygame.MOUSEBUTTONDOWN and is_primary_click(ev)) or ev.type == pygame.FINGERDOWN
         ):
             px, py = pos

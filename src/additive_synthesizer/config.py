@@ -16,7 +16,8 @@ class Config:
     height: int = field(default=720)
     brightness: int = 50
     presets: dict = field(default_factory=dict)
-    master_volume: float = 0.5
+    drum_mapping: dict = field(default_factory=dict)
+    master_volume: float = 1.0
     show_waveform: bool = False
     show_keys: int = 0
 
