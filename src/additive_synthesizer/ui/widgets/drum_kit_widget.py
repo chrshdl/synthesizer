@@ -19,8 +19,8 @@ class DrumKitWidget(DirtySprite):
         # We will scale these to the actual rect size.
         self.drums = [
             # [name, norm_x, norm_y, norm_w, norm_h, active_frames, default_wav]
-            ["hihat", 0.10, 0.15, 0.20, 0.12, 0, "hihat.wav"],
-            ["cymbal1", 0.15, 0.40, 0.20, 0.12, 0, "cymbal1.wav"],
+            ["cymbal1", 0.10, 0.15, 0.20, 0.12, 0, "cymbal1.wav"],
+            ["hihat", 0.15, 0.40, 0.20, 0.12, 0, "hihat.wav"],
             ["cymbal2", 0.70, 0.15, 0.25, 0.15, 0, "cymbal2.wav"],
             ["tom1", 0.35, 0.25, 0.15, 0.20, 0, "tom1.wav"],
             ["tom2", 0.50, 0.25, 0.15, 0.20, 0, "tom2.wav"],
