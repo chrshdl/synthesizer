@@ -46,6 +46,7 @@ def run(conf: Config) -> None:
         buffer=512,
         allowedchanges=0,
     )
+    pygame.mixer.set_num_channels(16)
     pygame.init()
 
     # force WirePlumber volume to 85% after everything is initialized.
