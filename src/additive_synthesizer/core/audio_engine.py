@@ -27,8 +27,8 @@ class AudioEngine:
         self.note_states = {}
         self.lock = threading.Lock()
 
-        # Generate in small 256-sample chunks (5.8ms) for fast UI responsiveness
-        self.chunk_size = 256
+        # Generate in small 64-sample chunks (1.45ms) for fast UI responsiveness
+        self.chunk_size = 64
         self.t_idx = 0
         self.sr = 44100
         self.length = self.sr
@@ -71,10 +71,9 @@ class AudioEngine:
         # We use a 2048 buffer (~46ms). Anything smaller (like period=256) causes ALSA 
         # to starve and throw constant XRUN crackles because Python's GIL cannot feed it fast enough!
         self.aplay_process = subprocess.Popen(
-            ['aplay', '-q', '-f', 'S16_LE', '-c', '1', '-r', '44100', '--buffer-size=512'],
+            ['aplay', '-q', '-f', 'S16_LE', '-c', '2', '-r', '44100', '--period-size=64', '--buffer-size=256'],
             stdin=subprocess.PIPE
         )
-        
         try:
             import fcntl
             # F_SETPIPE_SZ = 1031. Shrink pipe to 4096 bytes (46ms latency)
@@ -143,9 +142,15 @@ class AudioEngine:
             # to prevent harsh digital clipping/crackling.
             chunk = np.tanh(chunk)
             int_chunk = (chunk * 32767).astype(np.int16)
+            
+            # Hack to halve pipe latency: output stereo to double the byte rate!
+            # The 4096-byte minimum pipe buffer will drain twice as fast (23ms instead of 46ms).
+            stereo_chunk = np.empty(self.chunk_size * 2, dtype=np.int16)
+            stereo_chunk[0::2] = int_chunk
+            stereo_chunk[1::2] = int_chunk
 
             try:
-                self.aplay_process.stdin.write(int_chunk.tobytes())
+                self.aplay_process.stdin.write(stereo_chunk.tobytes())
                 self.aplay_process.stdin.flush()
                 
                 if np.max(np.abs(int_chunk)) > 100:
