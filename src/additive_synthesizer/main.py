@@ -76,6 +76,7 @@ def run(conf: Config) -> None:
     pygame.mouse.set_visible(False)
 
     display_type = detect_display_type()
+    conf.display_type = display_type
     
     if display_type == "waveshare":
         use_hardware_renderer = False

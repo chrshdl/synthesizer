@@ -135,12 +135,6 @@ class SynthesizerView:
 
         btn_y = (self.top_bar_h - btn_h) // 2
 
-        self.on_settings_action = None
-
-        def _open_settings():
-            if self.on_settings_action:
-                self.on_settings_action()
-
         self.buttons = [
             ButtonWidget(
                 (16, btn_y, btn_w, btn_h),
@@ -188,14 +182,6 @@ class SynthesizerView:
                 "MODE",
                 self.toggle_keys,
                 self.font_med,
-                self.panel_accent,
-                self.white,
-            ),
-            ButtonWidget(
-                (16 + 6 * (btn_w + pad), btn_y, btn_w, btn_h),
-                "\ue1a7",
-                _open_settings,
-                self.font_icons,
                 self.panel_accent,
                 self.white,
             ),

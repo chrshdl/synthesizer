@@ -14,6 +14,7 @@ LOGGER = Logger("config.py").get()
 class Config:
     width: int = field(default=1280)
     height: int = field(default=720)
+    display_type: str = "unknown"
     brightness: int = 50
     presets: dict = field(default_factory=dict)
     drum_mapping: dict = field(default_factory=dict)
