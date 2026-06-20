@@ -3,19 +3,22 @@ import pygame
 
 from additive_synthesizer.config import ConfigManager
 
-def get_event_pos(ev, width=1280, height=720):
+def get_event_pos(ev, width=None, height=None):
     """
     Unified coordinate extraction for mouse and finger events.
     Adapts touch mappings based on display type.
     """
     if ev.type in (pygame.FINGERDOWN, pygame.FINGERUP, pygame.FINGERMOTION):
         conf = ConfigManager.get_config()
+        w = width if width is not None else conf.width
+        h = height if height is not None else conf.height
+        
         if conf.display_type == "waveshare":
             # Native landscape: normal mapping
-            return (int(ev.x * width), int(ev.y * height))
+            return (int(ev.x * w), int(ev.y * h))
         else:
             # RPi Display 2 (or unknown): 270-degree rotation mapping
-            return (int((1.0 - ev.x) * width), int(ev.y * height))
+            return (int((1.0 - ev.x) * w), int(ev.y * h))
     elif hasattr(ev, "pos"):
         return ev.pos
     return None
