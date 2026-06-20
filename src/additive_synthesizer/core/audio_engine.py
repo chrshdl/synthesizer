@@ -27,8 +27,8 @@ class AudioEngine:
         self.note_states = {}
         self.lock = threading.Lock()
 
-        # Generate in small 128-sample chunks (2.9ms) for fast UI responsiveness
-        self.chunk_size = 128
+        # Generate in small 64-sample chunks (1.45ms) for fast UI responsiveness
+        self.chunk_size = 64
         self.t_idx = 0
         self.sr = 44100
         self.length = self.sr
@@ -71,7 +71,7 @@ class AudioEngine:
         # We use a 2048 buffer (~46ms). Anything smaller (like period=256) causes ALSA 
         # to starve and throw constant XRUN crackles because Python's GIL cannot feed it fast enough!
         self.aplay_process = subprocess.Popen(
-            ['aplay', '-q', '-f', 'S16_LE', '-c', '2', '-r', '44100', '--period-size=128', '--buffer-size=512'],
+            ['aplay', '-q', '-f', 'S16_LE', '-c', '2', '-r', '44100', '--period-size=64', '--buffer-size=256'],
             stdin=subprocess.PIPE
         )
         try:
@@ -92,10 +92,13 @@ class AudioEngine:
                 states = self.note_states.copy()
                 target = self.target_amps.copy()
 
-            amp_step = (target - self.current_amps) / self.chunk_size
-            steps = np.arange(self.chunk_size)
-            amp_envelope = self.current_amps[:, None] + amp_step[:, None] * steps
-            self.current_amps = target
+            if np.array_equal(target, self.current_amps):
+                amp_envelope = self.current_amps[:, None]
+            else:
+                amp_step = (target - self.current_amps) / self.chunk_size
+                steps = np.arange(self.chunk_size, dtype=np.float32)
+                amp_envelope = self.current_amps[:, None] + amp_step[:, None] * steps
+                self.current_amps = target
 
             if active_list:
                 start_idx = self.t_idx % self.length
@@ -107,14 +110,19 @@ class AudioEngine:
                     
                     target_env = 1.0 if state == 'on' else 0.0
                     
-                    # calculate linear envelope ramp for this specific note
-                    max_change = env_step * self.chunk_size
-                    if target_env > start_env:
-                        end_env = min(target_env, start_env + max_change)
+                    if start_env == target_env:
+                        end_env = start_env
+                        note_ramp = start_env
                     else:
-                        end_env = max(target_env, start_env - max_change)
+                        # calculate linear envelope ramp for this specific note
+                        max_change = env_step * self.chunk_size
+                        if target_env > start_env:
+                            end_env = min(target_env, start_env + max_change)
+                        else:
+                            end_env = max(target_env, start_env - max_change)
+                            
+                        note_ramp = np.linspace(start_env, end_env, self.chunk_size, dtype=np.float32)
                         
-                    note_ramp = np.linspace(start_env, end_env, self.chunk_size, dtype=np.float32)
                     self.note_envs[f] = end_env
 
                     if end_idx <= self.length:
@@ -126,7 +134,11 @@ class AudioEngine:
                         ), axis=1)
 
                     # multiply the partials envelope with the note's fade in/out envelope
-                    chunk += np.sum(waves * amp_envelope, axis=0) * note_ramp
+                    note_audio = np.sum(waves * amp_envelope, axis=0)
+                    if type(note_ramp) is float and note_ramp == 1.0:
+                        chunk += note_audio
+                    else:
+                        chunk += note_audio * note_ramp
 
                     # if the note is fully faded out and marked off, remove it
                     if end_env == 0.0 and state == 'off':
