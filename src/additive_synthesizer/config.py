@@ -58,8 +58,6 @@ class Config:
         # Write to temporary file
         with tmp_path.open("w") as f:
             json.dump(config_dict, f, indent=4)
-            f.flush()
-            os.fsync(f.fileno())
 
         # Atomically replace the original
         os.replace(tmp_path, path)
