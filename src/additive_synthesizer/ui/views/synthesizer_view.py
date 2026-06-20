@@ -121,6 +121,7 @@ class SynthesizerView:
         self.active_idx = None
         self.phase_offset = 0.0
         self.audio_engine.set_master_volume(self.master_volume)
+        self.drum_engine.set_master_volume(self.master_volume)
 
         self.audio_needs_update = False
 
@@ -386,7 +387,8 @@ class SynthesizerView:
 
     def set_master_volume(self, vol):
         self.master_volume = vol
-        self.audio_engine.master_volume = vol
+        self.audio_engine.set_master_volume(vol)
+        self.drum_engine.set_master_volume(vol)
         self.audio_needs_update = True
 
     def _notify_audio(self):

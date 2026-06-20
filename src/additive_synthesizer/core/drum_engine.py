@@ -23,5 +23,9 @@ class DrumEngine:
     def get_available_sounds(self):
         return sorted(list(self.sounds.keys()))
 
+    def set_master_volume(self, vol: float):
+        for sound in self.sounds.values():
+            sound.set_volume(vol)
+
     def handle_event(self, event):
         pass
