@@ -10,6 +10,10 @@ def get_event_pos(ev, width=None, height=None):
     """
     if ev.type in (pygame.FINGERDOWN, pygame.FINGERUP, pygame.FINGERMOTION):
         conf = ConfigManager.get_config()
+        if ev.type == pygame.FINGERDOWN:
+            import time
+            conf.latency_t0 = time.time()
+            
         w = width if width is not None else conf.width
         h = height if height is not None else conf.height
         
