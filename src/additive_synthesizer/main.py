@@ -90,6 +90,7 @@ def run(conf: Config) -> None:
 
     gpu_renderer = None
     main_surface = None
+    screen_surface = None
 
     try:
         if use_hardware_renderer:
@@ -102,7 +103,11 @@ def run(conf: Config) -> None:
             )
             main_surface = pygame.Surface((conf.width, conf.height))
         else:
-            main_surface = pygame.display.set_mode((conf.width, conf.height))
+            screen_surface = pygame.display.set_mode((conf.width, conf.height))
+            if conf.display_type == "waveshare":
+                main_surface = pygame.Surface((conf.width, conf.height))
+            else:
+                main_surface = screen_surface
 
         state_manager = StateManager(main_surface)
 
@@ -185,8 +190,20 @@ def run(conf: Config) -> None:
                 if use_hardware_renderer and gpu_renderer:
                     gpu_renderer.render(main_surface)
                 else:
-                    # standard software blit
-                    pygame.display.update(dirty_rects)
+                    if conf.display_type == "waveshare":
+                        flipped_rects = []
+                        for r in dirty_rects:
+                            sub = main_surface.subsurface(r)
+                            flipped_sub = pygame.transform.flip(sub, True, True)
+                            new_x = conf.width - (r.x + r.width)
+                            new_y = conf.height - (r.y + r.height)
+                            new_r = pygame.Rect(new_x, new_y, r.width, r.height)
+                            screen_surface.blit(flipped_sub, new_r)
+                            flipped_rects.append(new_r)
+                        pygame.display.update(flipped_rects)
+                    else:
+                        # standard software blit
+                        pygame.display.update(dirty_rects)
     except Exception as e:
         logger.error(f"Critical system error: {e}", exc_info=True)
 

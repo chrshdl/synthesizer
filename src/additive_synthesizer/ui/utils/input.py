@@ -14,8 +14,8 @@ def get_event_pos(ev, width=None, height=None):
         h = height if height is not None else conf.height
         
         if conf.display_type == "waveshare":
-            # Native landscape: normal mapping
-            return (int(ev.x * w), int(ev.y * h))
+            # 180-degree rotation mapping
+            return (int((1.0 - ev.x) * w), int((1.0 - ev.y) * h))
         else:
             # RPi Display 2 (or unknown): 270-degree rotation mapping
             return (int((1.0 - ev.x) * w), int(ev.y * h))
