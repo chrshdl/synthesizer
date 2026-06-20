@@ -27,8 +27,8 @@ class AudioEngine:
         self.note_states = {}
         self.lock = threading.Lock()
 
-        # Generate in small 64-sample chunks (1.45ms) for fast UI responsiveness
-        self.chunk_size = 64
+        # Generate in small 128-sample chunks (2.9ms) for fast UI responsiveness
+        self.chunk_size = 128
         self.t_idx = 0
         self.sr = 44100
         self.length = self.sr
@@ -71,7 +71,7 @@ class AudioEngine:
         # We use a 2048 buffer (~46ms). Anything smaller (like period=256) causes ALSA 
         # to starve and throw constant XRUN crackles because Python's GIL cannot feed it fast enough!
         self.aplay_process = subprocess.Popen(
-            ['aplay', '-q', '-f', 'S16_LE', '-c', '2', '-r', '44100', '--period-size=64', '--buffer-size=256'],
+            ['aplay', '-q', '-f', 'S16_LE', '-c', '2', '-r', '44100', '--period-size=128', '--buffer-size=512'],
             stdin=subprocess.PIPE
         )
         try:
