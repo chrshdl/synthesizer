@@ -71,7 +71,7 @@ class AudioEngine:
         # We use a 2048 buffer (~46ms). Anything smaller (like period=256) causes ALSA 
         # to starve and throw constant XRUN crackles because Python's GIL cannot feed it fast enough!
         self.aplay_process = subprocess.Popen(
-            ['aplay', '-q', '-f', 'S16_LE', '-c', '2', '-r', '44100', '--period-size=64', '--buffer-size=256'],
+            ['aplay', '-q', '-f', 'S16_LE', '-c', '2', '-r', '44100', '--period-size=128', '--buffer-size=512'],
             stdin=subprocess.PIPE
         )
         try:
