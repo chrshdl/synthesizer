@@ -17,13 +17,27 @@ from .states.synthesizer_state import SynthesizerState
 logger = Logger("SynthesizerOS").get()
 
 
-def is_raspberry_pi_4() -> bool:
+def detect_display_type() -> str:
+    """
+    Detects the connected display type by reading DRM KMS modes.
+    Returns 'waveshare', 'pi_display_2', or 'unknown'.
+    """
     try:
-        with open("/proc/device-tree/model", "r") as f:
-            model = f.read()
-            return "Raspberry Pi 4" in model
-    except (FileNotFoundError, OSError):
-        return False
+        import glob
+        for mode_file in glob.glob("/sys/class/drm/card*-*/modes"):
+            try:
+                with open(mode_file, "r") as f:
+                    modes = f.read().splitlines()
+                    for mode in modes:
+                        if mode == "1024x600":
+                            return "waveshare"
+                        elif mode in ("720x1280", "1280x720"):
+                            return "pi_display_2"
+            except (FileNotFoundError, OSError):
+                continue
+    except Exception:
+        pass
+    return "unknown"
 
 
 def run(conf: Config) -> None:
@@ -61,7 +75,18 @@ def run(conf: Config) -> None:
     pygame.font.init()
     pygame.mouse.set_visible(False)
 
-    use_hardware_renderer = is_raspberry_pi_4()
+    display_type = detect_display_type()
+    
+    if display_type == "waveshare":
+        use_hardware_renderer = False
+        conf.width = 1024
+        conf.height = 600
+        logger.info("Detected Waveshare 7'' DSI display. Using software renderer at 1024x600.")
+    else:
+        # Defaults to Pi Display 2 (or unknown)
+        use_hardware_renderer = True
+        logger.info(f"Detected {display_type} display. Using hardware renderer at {conf.width}x{conf.height}.")
+
     gpu_renderer = None
     main_surface = None
 
