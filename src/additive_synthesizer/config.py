@@ -1,6 +1,6 @@
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Optional
@@ -33,14 +33,21 @@ class Config:
                 with open(path, "r") as f:
                     config = json.load(f)
             except (JSONDecodeError, OSError) as e:
-                # handle empy or corrupt config.json
+                # handle empty or corrupt config.json
                 LOGGER.warning(
                     f"Config file {path} is invalid or corrupted, using defaults.",
                     exc_info=e,
                 )
                 config = {}
 
-        result = Config(**config)
+        # Filter out keys that don't exist in the current Config schema so
+        # that loading a config written by a newer (or older) version of the
+        # app doesn't raise TypeError: __init__() got an unexpected keyword.
+        known_keys = {f.name for f in fields(Config)}
+        unknown = set(config) - known_keys
+        if unknown:
+            LOGGER.warning(f"Ignoring unknown config keys (schema mismatch): {unknown}")
+        result = Config(**{k: v for k, v in config.items() if k in known_keys})
         LOGGER.info(f"Config: {result}")
 
         if not path.exists() or not config:
