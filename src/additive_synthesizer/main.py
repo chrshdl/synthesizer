@@ -69,7 +69,7 @@ def run(conf: Config) -> None:
             ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "0.85"], check=False
         )
     except Exception as e:
-        logger.warning(f"Failed to set volume: str{e}")
+        logger.warning(f"Failed to set volume: {e}")
 
     # Initialize font module
     pygame.font.init()
@@ -167,20 +167,20 @@ def run(conf: Config) -> None:
                 drum_engine.handle_event(event)
 
                 # --- Handle QWERTY Intercepts ---
+                # Guard: 'keyboard' only exists when show_keys is 1 or 2.
+                # In drone mode (0) or drum mode (3) the attribute is absent.
                 if event.type == pygame.KEYDOWN and event.key in qwerty_mapping:
                     idx = qwerty_mapping[event.key]
-                    # Add to the visual set
-                    initial_state.view.keyboard.active_indices.add(idx)
-                    initial_state.view.keyboard._rebuild_image()
-                    # Trigger audio
+                    if hasattr(initial_state.view, "keyboard"):
+                        initial_state.view.keyboard.active_indices.add(idx)
+                        initial_state.view.keyboard._rebuild_image()
                     initial_state.view.on_note_on(idx)
 
                 elif event.type == pygame.KEYUP and event.key in qwerty_mapping:
                     idx = qwerty_mapping[event.key]
-                    # Remove from the visual set
-                    initial_state.view.keyboard.active_indices.discard(idx)
-                    initial_state.view.keyboard._rebuild_image()
-                    # Stop audio
+                    if hasattr(initial_state.view, "keyboard"):
+                        initial_state.view.keyboard.active_indices.discard(idx)
+                        initial_state.view.keyboard._rebuild_image()
                     initial_state.view.on_note_off(idx)
 
             state_manager.update(dt)
@@ -191,16 +191,11 @@ def run(conf: Config) -> None:
                     gpu_renderer.render(main_surface)
                 else:
                     if conf.display_type == "waveshare":
-                        flipped_rects = []
-                        for r in dirty_rects:
-                            sub = main_surface.subsurface(r)
-                            flipped_sub = pygame.transform.flip(sub, True, True)
-                            new_x = conf.width - (r.x + r.width)
-                            new_y = conf.height - (r.y + r.height)
-                            new_r = pygame.Rect(new_x, new_y, r.width, r.height)
-                            screen_surface.blit(flipped_sub, new_r)
-                            flipped_rects.append(new_r)
-                        pygame.display.update(flipped_rects)
+                        # Flip the whole logical surface once instead of
+                        # allocating one Surface per dirty rect every frame.
+                        flipped = pygame.transform.flip(main_surface, True, True)
+                        screen_surface.blit(flipped, (0, 0))
+                        pygame.display.flip()
                     else:
                         # standard software blit
                         pygame.display.update(dirty_rects)
@@ -209,6 +204,12 @@ def run(conf: Config) -> None:
 
     finally:
         logger.info("Cleaning up resources...")
+        # Explicitly shut down the native C++ engine so se_destroy() is
+        # called and the ALSA device + audio thread are released before the
+        # process exits. __del__ is not reliable for this at interpreter
+        # shutdown (finalizer order is not guaranteed).
+        if "audio_engine" in locals() and hasattr(audio_engine, "shutdown"):
+            audio_engine.shutdown()
         pygame.quit()
 
 

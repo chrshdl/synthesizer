@@ -1,7 +1,7 @@
 import ctypes
 import math
-import struct
 
+import numpy as np
 import pygame
 from OpenGL.GL import (
     # Constants
@@ -34,6 +34,7 @@ from OpenGL.GL import (
     glCompileShader,
     glCreateProgram,
     glCreateShader,
+    glDeleteShader,
     glDrawArrays,
     glEnableVertexAttribArray,
     glGenBuffers,
@@ -70,26 +71,17 @@ class HardwareRenderer:
         self.program = self._compile_shaders()
         glUseProgram(self.program)
 
-        # format: X, Y, U, V
-        vertices = [
-            -1.0,
-            -1.0,
-            1.0,
-            0.0,  # bottom left
-            1.0,
-            -1.0,
-            0.0,
-            0.0,  # bottom right
-            -1.0,
-            1.0,
-            1.0,
-            1.0,  # top left
-            1.0,
-            1.0,
-            0.0,
-            1.0,  # top right
-        ]
-        vertex_data = struct.pack("16f", *vertices)
+        # Each row is one vertex: (x, y, u, v)
+        # NDC coords range [-1, 1]; UV origin is top-left in OpenGL convention.
+        # fmt: off
+        vertices = np.array([
+            -1.0, -1.0,  1.0, 0.0,  # bottom-left  NDC → UV (1, 0)
+             1.0, -1.0,  0.0, 0.0,  # bottom-right NDC → UV (0, 0)
+            -1.0,  1.0,  1.0, 1.0,  # top-left     NDC → UV (1, 1)
+             1.0,  1.0,  0.0, 1.0,  # top-right    NDC → UV (0, 1)
+        ], dtype=np.float32)
+        # fmt: on
+        vertex_data = vertices.tobytes()
 
         self.vbo = glGenBuffers(1)
         glBindBuffer(GL_ARRAY_BUFFER, self.vbo)
@@ -217,5 +209,11 @@ class HardwareRenderer:
         glLinkProgram(prog)
         if not glGetProgramiv(prog, GL_LINK_STATUS):
             raise RuntimeError(glGetProgramInfoLog(prog))
+
+        # The driver has copied everything it needs into the program object;
+        # the individual shader handles are now orphaned GPU allocations.
+        # Mark them for deletion so the driver can free them immediately.
+        glDeleteShader(vs)
+        glDeleteShader(fs)
 
         return prog

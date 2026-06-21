@@ -1,7 +1,13 @@
+import threading
+import time
+
 import pygame
 
-
 from additive_synthesizer.config import ConfigManager
+
+# Protects conf.latency_t0, which is written here (main thread on FINGERDOWN)
+# and read by the fallback Python audio thread.
+_latency_lock = threading.Lock()
 
 def get_event_pos(ev, width=None, height=None):
     """
@@ -11,8 +17,8 @@ def get_event_pos(ev, width=None, height=None):
     if ev.type in (pygame.FINGERDOWN, pygame.FINGERUP, pygame.FINGERMOTION):
         conf = ConfigManager.get_config()
         if ev.type == pygame.FINGERDOWN:
-            import time
-            conf.latency_t0 = time.time()
+            with _latency_lock:
+                conf.latency_t0 = time.time()
             
         w = width if width is not None else conf.width
         h = height if height is not None else conf.height

@@ -43,15 +43,23 @@ class ButtonWidget(DirtySprite):
 
         pointer_id = getattr(ev, "finger_id", 0) if ev.type in (pygame.FINGERDOWN, pygame.FINGERUP) else 0
 
-        if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
-            if is_primary_click(ev):
-                if self.rect.collidepoint(pos):
-                    self.active_pointer = pointer_id
-                    self.is_pressed = True
-                    self.press_time = pygame.time.get_ticks()
-                    self.long_press_triggered = False
-                    self._rebuild_image()
-                    return True
+        if ev.type == pygame.MOUSEBUTTONDOWN and is_primary_click(ev):
+            if self.rect.collidepoint(pos):
+                self.active_pointer = pointer_id
+                self.is_pressed = True
+                self.press_time = pygame.time.get_ticks()
+                self.long_press_triggered = False
+                self._rebuild_image()
+                return True
+
+        elif ev.type == pygame.FINGERDOWN:
+            if self.rect.collidepoint(pos):
+                self.active_pointer = pointer_id
+                self.is_pressed = True
+                self.press_time = pygame.time.get_ticks()
+                self.long_press_triggered = False
+                self._rebuild_image()
+                return True
         
         elif ev.type in (pygame.MOUSEBUTTONUP, pygame.FINGERUP):
             if self.is_pressed and self.active_pointer == pointer_id:

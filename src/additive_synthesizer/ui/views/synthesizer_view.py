@@ -525,7 +525,7 @@ class SynthesizerView:
                 p.active_pointer = pointer_id
                 p.set_amp_from_y(py)
                 self.active_idx = idx
-                self._notify_audio()
+                self.audio_needs_update = True
                 return True
 
             for i, p in enumerate(self.partials):
@@ -536,7 +536,7 @@ class SynthesizerView:
                     p.active_pointer = pointer_id
                     self.active_idx = i
                     p.set_amp_from_y(py)
-                    self._notify_audio()
+                    self.audio_needs_update = True
                     return True
             return False
 

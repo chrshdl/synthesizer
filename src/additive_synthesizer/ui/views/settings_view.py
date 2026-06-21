@@ -31,8 +31,17 @@ class SettingsView:
         self.status_message = ""
         self.scan_thread = None
 
+        # Thread-safe pending state: background threads write here; the
+        # main-thread update() applies the results to avoid mutating
+        # Pygame sprites from a daemon thread (Pygame is not thread-safe).
+        self._pending_devices = None   # list[dict] | None
+        self._pending_status = None    # str | None
+        self._devices_dirty = False    # set True by background threads
+
         self._init_ui()
-        self.refresh_devices_sync()  # load already known devices
+        # Kick off the initial device list load on a background thread so
+        # the state-push does not block the main loop.
+        threading.Thread(target=self._load_devices_async, daemon=True).start()
 
     def _init_ui(self):
         btn_w, btn_h = 140, 60
@@ -71,28 +80,36 @@ class SettingsView:
 
     def _scan_thread_func(self):
         try:
-            # ensure powered on
             subprocess.run(["bluetoothctl", "power", "on"], capture_output=True)
-            # scan
             subprocess.run(
                 ["bluetoothctl", "--timeout", "15", "scan", "on"], capture_output=True
             )
         except Exception as e:
             self.logger.error(f"Scan error: {e}")
 
-        self.refresh_devices_sync()
+        devices = self._fetch_devices()
+        # Post results to main thread — never touch Pygame sprites here.
+        self._pending_devices = devices
+        self._pending_status = "Scan complete."
+        self._devices_dirty = True
         self.is_scanning = False
-        self.status_message = "Scan complete."
 
-    def refresh_devices_sync(self):
+    def _load_devices_async(self):
+        """Background load for the initial device list (called from __init__)."""
+        devices = self._fetch_devices()
+        self._pending_devices = devices
+        self._pending_status = ""
+        self._devices_dirty = True
+
+    def _fetch_devices(self) -> list:
+        """Queries bluetoothctl and returns a list of device dicts.
+
+        Safe to call from any thread — does NOT touch Pygame.
+        """
         try:
-            # Get all devices
             res = subprocess.run(
                 ["bluetoothctl", "devices"], capture_output=True, text=True
             )
-            lines = res.stdout.strip().split("\n")
-
-            # Get connected devices
             res_conn = subprocess.run(
                 ["bluetoothctl", "devices", "Connected"], capture_output=True, text=True
             )
@@ -104,7 +121,7 @@ class SettingsView:
                         connected_macs.append(parts[1])
 
             new_devices = []
-            for line in lines:
+            for line in res.stdout.strip().split("\n"):
                 if line.startswith("Device "):
                     parts = line.split(" ", 2)
                     if len(parts) >= 3:
@@ -120,11 +137,10 @@ class SettingsView:
                                     "connected": mac in connected_macs,
                                 }
                             )
-            self.devices = new_devices
+            return new_devices
         except Exception as e:
             self.logger.error(f"Get devices error: {e}")
-            self.devices = []
-        self._rebuild_device_buttons()
+            return []
 
     def connect_device(self, mac):
         self.status_message = f"Connecting to {mac}..."
@@ -133,15 +149,15 @@ class SettingsView:
         ).start()
 
     def _connect_thread_func(self, mac):
+        status = ""
         try:
-            # Pair, trust, connect
             subprocess.run(["bluetoothctl", "pair", mac], capture_output=True)
             subprocess.run(["bluetoothctl", "trust", mac], capture_output=True)
             res = subprocess.run(
                 ["bluetoothctl", "connect", mac], capture_output=True, text=True
             )
             if "Connection successful" in res.stdout:
-                self.status_message = f"Connected to {mac}"
+                status = f"Connected to {mac}"
                 self.logger.info("Switching audio to Bluetooth...")
                 try:
                     self.audio_engine.switch_to_bluetooth()
@@ -149,10 +165,13 @@ class SettingsView:
                 except Exception as e:
                     self.logger.error(f"Failed to reload audio engines: {e}")
             else:
-                self.status_message = f"Failed to connect {mac}"
+                status = f"Failed to connect {mac}"
         except Exception as e:
-            self.status_message = f"Error: {e}"
-        self.refresh_devices_sync()
+            status = f"Error: {e}"
+        # Post results to main thread.
+        self._pending_devices = self._fetch_devices()
+        self._pending_status = status
+        self._devices_dirty = True
 
     def disconnect_device(self, mac):
         self.status_message = f"Disconnecting {mac}..."
@@ -161,12 +180,16 @@ class SettingsView:
         ).start()
 
     def _disconnect_thread_func(self, mac):
+        status = ""
         try:
             subprocess.run(["bluetoothctl", "disconnect", mac], capture_output=True)
-            self.status_message = f"Disconnected {mac}"
+            status = f"Disconnected {mac}"
         except Exception as e:
-            self.status_message = f"Error: {e}"
-        self.refresh_devices_sync()
+            status = f"Error: {e}"
+        # Post results to main thread.
+        self._pending_devices = self._fetch_devices()
+        self._pending_status = status
+        self._devices_dirty = True
 
     def _rebuild_device_buttons(self):
         for b in self.device_buttons:
@@ -259,6 +282,18 @@ class SettingsView:
         self.draw(surface, background)
 
     def update(self, dt: float):
+        # Apply any pending device-list update posted by a background thread.
+        # This is the ONLY place _rebuild_device_buttons() is called, ensuring
+        # Pygame sprites are only mutated from the main thread.
+        if self._devices_dirty:
+            self._devices_dirty = False
+            if self._pending_devices is not None:
+                self.devices = self._pending_devices
+                self._pending_devices = None
+            if self._pending_status is not None:
+                self.status_message = self._pending_status
+                self._pending_status = None
+            self._rebuild_device_buttons()
         self.ui_layer.update(dt=dt)
 
     def handle_event(self, ev):

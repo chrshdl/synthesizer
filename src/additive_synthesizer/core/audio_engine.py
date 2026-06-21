@@ -22,24 +22,30 @@ Usage (unchanged from before — main.py needs zero edits):
     engine.update_amplitudes([1.0, 0.5, 0.25, ...])
 """
 
-from .audio_engine_native import NativeAudioEngine, is_available as _native_available
-
+from .audio_engine_native import NativeAudioEngine
+from .audio_engine_native import is_available as _native_available
 
 if _native_available:
+
     class AudioEngine(NativeAudioEngine):
         """
         AudioEngine backed by the C++ ALSA engine (libsynthengine.so).
         Lowest possible latency — writes directly to ALSA from a native thread.
         """
+
         pass
 
 else:
     # ------------------------------------------------------------------ #
     # Pure-Python fallback (original aplay-based implementation)         #
     # ------------------------------------------------------------------ #
-    import numpy as np
-    import threading
     import subprocess
+    import threading
+    import time
+
+    import numpy as np
+    from additive_synthesizer.config import ConfigManager
+    from ..ui.utils.input import _latency_lock
 
     class AudioEngine:  # type: ignore[no-redef]
         """
@@ -60,7 +66,19 @@ else:
         def __init__(self, num_partials=8):
             self.num_partials = num_partials
             self.key_freqs = [
-                262, 277, 294, 311, 330, 349, 370, 392, 415, 440, 466, 494, 523,
+                262,
+                277,
+                294,
+                311,
+                330,
+                349,
+                370,
+                392,
+                415,
+                440,
+                466,
+                494,
+                523,
             ]
 
             self.master_volume = 0.5
@@ -103,7 +121,9 @@ else:
                     p_f = np.random.uniform(0, 2 * np.pi)
 
                     wave_center = np.sin(2 * np.pi * base_f * t + p_c)
-                    wave_sharp = np.sin(2 * np.pi * (base_f + detune_hz) * t + p_s) * 0.4
+                    wave_sharp = (
+                        np.sin(2 * np.pi * (base_f + detune_hz) * t + p_s) * 0.4
+                    )
                     wave_flat = np.sin(2 * np.pi * (base_f - detune_hz) * t + p_f) * 0.4
 
                     thick_wave = (wave_center + wave_sharp + wave_flat) / 1.8
@@ -118,10 +138,14 @@ else:
             # crackles because Python's GIL cannot feed it fast enough!
             self.aplay_process = subprocess.Popen(
                 [
-                    "aplay", "-q",
-                    "-f", "S16_LE",
-                    "-c", "2",
-                    "-r", "44100",
+                    "aplay",
+                    "-q",
+                    "-f",
+                    "S16_LE",
+                    "-c",
+                    "2",
+                    "-r",
+                    "44100",
                     "--period-size=128",
                     "--buffer-size=512",
                 ],
@@ -129,10 +153,18 @@ else:
             )
             try:
                 import fcntl
-                # F_SETPIPE_SZ = 1031. Shrink pipe to 4096 bytes (~23ms latency)
-                fcntl.fcntl(self.aplay_process.stdin.fileno(), 1031, 4096)
+                import os
+
+                fd = self.aplay_process.stdin.fileno()
+                # Shrink pipe buffer to 4096 bytes (~23 ms) to minimise latency.
+                # F_SETPIPE_SZ = 1031 (Linux-specific).
+                fcntl.fcntl(fd, 1031, 4096)
+                # Make the pipe non-blocking so a stalled aplay causes a
+                # dropped chunk (brief glitch) instead of freezing this thread.
+                flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+                fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
             except Exception as e:
-                print("Could not resize pipe:", e)
+                print("Could not configure pipe:", e)
 
             # 25ms linear attack and release to eliminate clicking
             env_step = 1.0 / (44100 * 0.025)
@@ -150,7 +182,9 @@ else:
                 else:
                     amp_step = (target - self.current_amps) / self.chunk_size
                     steps = np.arange(self.chunk_size, dtype=np.float32)
-                    amp_envelope = self.current_amps[:, None] + amp_step[:, None] * steps
+                    amp_envelope = (
+                        self.current_amps[:, None] + amp_step[:, None] * steps
+                    )
                     self.current_amps = target
 
                 if active_list:
@@ -216,29 +250,39 @@ else:
                 stereo_chunk[1::2] = int_chunk
 
                 try:
+                    # Non-blocking write: if the pipe buffer is full (aplay
+                    # stalled / OS scheduler delay) we get BlockingIOError and
+                    # drop this chunk.  A dropped chunk causes a brief glitch;
+                    # a blocked write would freeze the entire audio thread.
                     self.aplay_process.stdin.write(stereo_chunk.tobytes())
-                    self.aplay_process.stdin.flush()
+                    # flush() is intentionally omitted: it is a no-op for an
+                    # unbuffered pipe write and can itself stall on some kernels.
 
                     if np.max(np.abs(int_chunk)) > 100:
-                        import time
-                        from additive_synthesizer.config import ConfigManager
                         conf = ConfigManager.get_config()
-                        if hasattr(conf, "latency_t0") and conf.latency_t0 is not None:
+                        with _latency_lock:
+                            t0 = conf.latency_t0
+                            if t0 is not None:
+                                conf.latency_t0 = None
+                        if t0 is not None:
                             t1 = time.time()
                             print(
-                                f"===========================================================",
+                                "===========================================================",
                                 flush=True,
                             )
                             print(
-                                f">>> SOFTWARE LATENCY: {(t1 - conf.latency_t0)*1000:.2f} ms <<<",
+                                f">>> SOFTWARE LATENCY: {(t1 - t0) * 1000:.2f} ms <<<",
                                 flush=True,
                             )
                             print(
-                                f"===========================================================",
+                                "===========================================================",
                                 flush=True,
                             )
-                            conf.latency_t0 = None
 
+                except BlockingIOError:
+                    # Pipe buffer full — aplay is stalled. Drop the chunk and
+                    # continue; the audio thread must never block here.
+                    pass
                 except (BrokenPipeError, OSError):
                     break
 
